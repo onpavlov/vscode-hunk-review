@@ -14,10 +14,6 @@
   "contributes": {
     "commands": [
       {
-        "command": "hunk-review.helloWorld",
-        "title": "Hello World"
-      },
-      {
         "command": "hunk-review.openDiff",
         "title": "hunk: Открыть ревью рабочего дерева",
         "category": "hunk-review"
