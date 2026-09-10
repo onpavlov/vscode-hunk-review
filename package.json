@@ -16,6 +16,32 @@
       {
         "command": "hunk-review.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "hunk-review.openDiff",
+        "title": "hunk: Открыть ревью рабочего дерева",
+        "category": "hunk-review"
+      },
+      {
+        "command": "hunk-review.sendComments",
+        "title": "hunk: Отправить комментарии агенту",
+        "category": "hunk-review",
+        "enablement": "hunk-review.hasPending"
+      },
+      {
+        "command": "hunk-review.stopSession",
+        "title": "hunk: Остановить hunk сессию",
+        "category": "hunk-review"
+      },
+      {
+        "command": "hunk-review.showSessionTerminal",
+        "title": "hunk: Показать терминал сессии",
+        "category": "hunk-review"
+      },
+      {
+        "command": "hunk-review.menu",
+        "title": "hunk: Меню ревью",
+        "category": "hunk-review"
       }
     ]
   },

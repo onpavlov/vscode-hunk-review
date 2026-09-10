@@ -1,15 +1,25 @@
-import * as assert from 'assert';
-
-// You can import and use all API from the 'vscode' module
-// as well as import your extension to test it
+import * as assert from 'node:assert';
 import * as vscode from 'vscode';
-// import * as myExtension from '../../extension';
 
-suite('Extension Test Suite', () => {
-	vscode.window.showInformationMessage('Start all tests.');
-
-	test('Sample test', () => {
-		assert.strictEqual(-1, [1, 2, 3].indexOf(5));
-		assert.strictEqual(-1, [1, 2, 3].indexOf(0));
+suite('extension activation', () => {
+	test('registers all hunk-review commands', async () => {
+		// The extension ID is <publisher>.<name>, or if publisher is missing, undefined_publisher.<name>
+		const ext = vscode.extensions.getExtension('undefined_publisher.hunk-review') || 
+			vscode.extensions.all.find(e => e.id.includes('hunk-review'));
+		
+		if (ext) {
+			await ext.activate();
+		}
+		
+		const commands = await vscode.commands.getCommands(true);
+		for (const id of [
+			'hunk-review.openDiff',
+			'hunk-review.sendComments',
+			'hunk-review.stopSession',
+			'hunk-review.showSessionTerminal',
+			'hunk-review.menu',
+		]) {
+			assert.ok(commands.includes(id), `missing command ${id}`);
+		}
 	});
 });

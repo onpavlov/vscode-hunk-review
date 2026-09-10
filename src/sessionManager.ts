@@ -100,6 +100,14 @@ export class SessionManager implements vscode.Disposable {
 		}
 	}
 
+	showTerminal(): void {
+		if (this.terminal) {
+			this.terminal.show();
+		} else {
+			this.toaster.info('Фоновая hunk-сессия не запущена');
+		}
+	}
+
 	dispose(): void {
 		this.terminal?.dispose();
 	}
