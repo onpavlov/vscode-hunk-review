@@ -43,8 +43,39 @@
         "command": "hunk-review.addComment",
         "title": "hunk: Добавить комментарий",
         "category": "hunk-review"
+      },
+      {
+        "command": "hunk-review.editComment",
+        "title": "hunk: Изменить комментарий",
+        "category": "hunk-review"
+      },
+      {
+        "command": "hunk-review.deleteComment",
+        "title": "hunk: Удалить комментарий",
+        "category": "hunk-review"
       }
-    ]
+    ],
+    "menus": {
+      "comments/commentThread/context": [
+        {
+          "command": "hunk-review.addComment",
+          "group": "inline",
+          "when": "commentController == hunk-review.comments"
+        }
+      ],
+      "comments/comment/context": [
+        {
+          "command": "hunk-review.editComment",
+          "group": "inline@1",
+          "when": "commentController == hunk-review.comments && comment.storeId"
+        },
+        {
+          "command": "hunk-review.deleteComment",
+          "group": "inline@2",
+          "when": "commentController == hunk-review.comments && comment.storeId"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

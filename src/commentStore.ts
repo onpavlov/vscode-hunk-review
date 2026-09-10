@@ -17,11 +17,25 @@ export class CommentStore {
 	}
 
 	async load(): Promise<CommentStoreData> {
+		let raw: string;
 		try {
-			const raw = await fs.readFile(this.file, 'utf8');
+			raw = await fs.readFile(this.file, 'utf8');
+		} catch {
+			// File does not exist yet — start empty.
+			return { ...EMPTY, comments: [] };
+		}
+		try {
 			const data = JSON.parse(raw) as CommentStoreData;
 			return { version: 1, comments: data.comments ?? [] };
 		} catch {
+			// Corrupt JSON — rename and start fresh.
+			const corrupt = `${this.file}.corrupt-${Date.now()}`;
+			try {
+				await fs.rename(this.file, corrupt);
+			} catch {
+				// rename failed — best effort
+			}
+			console.warn(`[hunk-review] comments.json was corrupt; renamed to ${path.basename(corrupt)}`);
 			return { ...EMPTY, comments: [] };
 		}
 	}

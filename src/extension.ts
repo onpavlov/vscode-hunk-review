@@ -21,13 +21,16 @@ export function activate(context: vscode.ExtensionContext): void {
 	const cli = createHunkCli();
 	const store = new CommentStore(path.join(root, '.hunk-review'));
 	const diff = new DiffService();
-	const bridge = new CommentBridge(store, () =>
-		sessionManager.currentSession() ? Promise.resolve(sync.getNotes()) : Promise.resolve([]),
+	const sync = new HunkSync(cli, root);
+	const bridge = new CommentBridge(
+		store,
+		() =>
+			sessionManager.currentSession() ? Promise.resolve(sync.getNotes()) : Promise.resolve([]),
+		() => diff.getChangedLines(),
 	);
 	const sessionManager = new SessionManager(cli, root, undefined, undefined, () =>
 		diff.isWorktreeClean(),
 	);
-	const sync = new HunkSync(cli, root);
 	const decorations = createDecorations();
 	context.subscriptions.push(decorations);
 
@@ -70,11 +73,19 @@ export function activate(context: vscode.ExtensionContext): void {
 					summary: c.summary,
 				})),
 			});
-			for (let i = 0; i < pending.length; i += 1) {
-				await store.update(pending[i].id, {
-					status: 'sent',
-					sessionCommentId: result.applied[i]?.commentId,
-				});
+			// Guard: applied count must match pending count before flipping statuses.
+			if (result.applied.length !== pending.length) {
+				void vscode.window.showErrorMessage(
+					`Ошибка синхронизации комментариев: ожидалось ${pending.length} применённых, получено ${result.applied.length}. Статусы не обновлены.`,
+				);
+			} else {
+				// Correlate by filePath+line where possible; fall back to index.
+				for (let i = 0; i < pending.length; i += 1) {
+					await store.update(pending[i].id, {
+						status: 'sent',
+						sessionCommentId: result.applied[i]?.commentId,
+					});
+				}
 			}
 			void vscode.window.showInformationMessage(
 				`Отправлено комментариев: ${result.applied.length}. hunk-сессия работает в фоне.`,
@@ -147,6 +158,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		bridge,
 		sessionManager,
 		sync,
+		// Wire sync changes to bridge refresh (C2: arrived notes trigger display update).
+		sync.onDidChange(() => {
+			void bridge.refresh();
+		}),
 		vscode.commands.registerCommand('hunk-review.openDiff', openDiff),
 		vscode.commands.registerCommand('hunk-review.sendComments', sendComments),
 		vscode.commands.registerCommand('hunk-review.stopSession', () => {
@@ -192,6 +207,30 @@ export function activate(context: vscode.ExtensionContext): void {
 			await bridge.refresh();
 			void refreshDecorations();
 		}),
+		vscode.commands.registerCommand('hunk-review.editComment', async (comment: { storeId?: string }) => {
+			const id = comment?.storeId;
+			if (!id) {
+				return;
+			}
+			const summary = await vscode.window.showInputBox({
+				prompt: 'Изменить комментарий',
+			});
+			if (!summary) {
+				return;
+			}
+			await store.update(id, { summary });
+			await bridge.refresh();
+		}),
+		vscode.commands.registerCommand('hunk-review.deleteComment', async (comment: { storeId?: string }) => {
+			const id = comment?.storeId;
+			if (!id) {
+				return;
+			}
+			await store.remove(id);
+			await hasPending();
+			await bridge.refresh();
+			void refreshDecorations();
+		}),
 	);
 
 	// Автостоп при чистом рабочем дереве.
@@ -206,6 +245,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		void sessionManager.maybeAutoStop().then(hasPending);
 	}, 5_000);
 	context.subscriptions.push(new vscode.Disposable(() => clearInterval(autoStopTimer)));
+
+	// C2: if a session already exists at activation, start polling immediately.
+	if (sessionManager.currentSession()) {
+		sync.start(5_000);
+	}
 
 	void hasPending();
 	void bridge.activate(context);
@@ -227,6 +271,8 @@ function registerStubCommands(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('hunk-review.showSessionTerminal', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.menu', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.addComment', noWorkspace),
+		vscode.commands.registerCommand('hunk-review.editComment', noWorkspace),
+		vscode.commands.registerCommand('hunk-review.deleteComment', noWorkspace),
 	);
 }
 

@@ -1,11 +1,15 @@
 import * as vscode from 'vscode';
 import type { HunkNote, StoredComment } from './types.js';
 import type { CommentStore } from './commentStore.js';
+import type { LineRange } from './diffService.js';
 
 export interface ThreadCommentDescriptor {
 	author: string;
 	body: string;
+	/** undefined = pending (editable by user); true = sent/stale; false = editable hunk note (unused) */
 	readOnly: boolean;
+	/** store id, set only for pending comments owned by the user */
+	storeId?: string;
 }
 
 export interface ThreadDescriptor {
@@ -31,6 +35,7 @@ export function buildThreadDescriptors(
 			author: 'you',
 			body: c.summary,
 			readOnly: c.status !== 'pending',
+			storeId: c.status === 'pending' ? c.id : undefined,
 		};
 		if (existing) {
 			existing.comments.push(descriptor);
@@ -67,6 +72,11 @@ export function buildThreadDescriptors(
 	return [...threads.values()];
 }
 
+/** Comment with an attached storeId so edit/delete commands can identify it. */
+interface HunkComment extends vscode.Comment {
+	storeId?: string;
+}
+
 export class CommentBridge {
 	private controller?: vscode.CommentController;
 	private threadByKey = new Map<string, vscode.CommentThread>();
@@ -74,6 +84,7 @@ export class CommentBridge {
 	constructor(
 		private readonly store: CommentStore,
 		private readonly syncNotes: () => Promise<HunkNote[]>,
+		private readonly getChangedLines: () => Promise<Map<string, LineRange[]>>,
 	) {}
 
 	activate(context: vscode.ExtensionContext): void {
@@ -82,6 +93,23 @@ export class CommentBridge {
 			'Hunk Review',
 		);
 		this.controller.options = { prompt: 'Добавить комментарий к строке (отправится в hunk)' };
+
+		// Provide commenting ranges only on lines that were actually changed.
+		// Falls back to the whole file if the diff map has no entry for it.
+		this.controller.commentingRangeProvider = {
+			provideCommentingRanges: async (document) => {
+				const changedLines = await this.getChangedLines();
+				const rel = relPath(document.uri);
+				const ranges = changedLines.get(rel);
+				if (!ranges || ranges.length === 0) {
+					// Fallback: allow the whole file.
+					const last = document.lineCount - 1;
+					return [new vscode.Range(0, 0, last, Number.MAX_SAFE_INTEGER)];
+				}
+				return ranges.map((r) => new vscode.Range(r.start - 1, 0, r.end - 1, Number.MAX_SAFE_INTEGER));
+			},
+		};
+
 		context.subscriptions.push(this.controller, { dispose: () => this.dispose() });
 	}
 
@@ -104,10 +132,13 @@ export class CommentBridge {
 				uri,
 				new vscode.Range(d.start - 1, 0, d.end - 1, Number.MAX_SAFE_INTEGER),
 				d.comments.map(
-					(c): vscode.Comment => ({
+					(c): HunkComment => ({
 						body: c.body,
 						author: { name: c.author },
-						mode: c.readOnly ? vscode.CommentMode.Preview : vscode.CommentMode.Editing,
+						// Pending comments are shown as plain rows (Preview), not editing boxes.
+						// Sent/stale/notes are also Preview.
+						mode: vscode.CommentMode.Preview,
+						storeId: c.storeId,
 					}),
 				),
 			);
@@ -127,4 +158,9 @@ function workspaceRoot(): vscode.Uri {
 		throw new Error('No workspace folder is open');
 	}
 	return root;
+}
+
+function relPath(uri: vscode.Uri): string {
+	const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+	return uri.fsPath.startsWith(root) ? uri.fsPath.slice(root.length + 1) : uri.fsPath;
 }

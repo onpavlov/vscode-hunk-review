@@ -18,6 +18,7 @@ export function createDecorations(): {
 	const reviewed = vscode.window.createTextEditorDecorationType({
 		backgroundColor: new vscode.ThemeColor('editor.wordHighlightBackground'),
 		overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.commentAggregation'),
+		isWholeLine: true,
 	});
 
 	return {
