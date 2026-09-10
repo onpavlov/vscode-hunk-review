@@ -7,6 +7,7 @@ import { DiffService } from './diffService.js';
 import { CommentBridge } from './commentBridge.js';
 import { SessionManager } from './sessionManager.js';
 import { HunkSync } from './hunkSync.js';
+import { createDecorations } from './decorations.js';
 
 export function activate(context: vscode.ExtensionContext): void {
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -27,6 +28,12 @@ export function activate(context: vscode.ExtensionContext): void {
 		diff.isWorktreeClean(),
 	);
 	const sync = new HunkSync(cli, root);
+	const decorations = createDecorations();
+	context.subscriptions.push(decorations);
+
+	const refreshDecorations = async () => {
+		decorations.update(await diff.getChangedLines());
+	};
 
 	const hasPending = async () => {
 		const n = await store.pendingCount();
@@ -132,7 +139,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			break; // открываем первый изменённый файл; остальные — по клику из списка
 		}
 		await bridge.refresh();
-		void sync;
+		await refreshDecorations();
 	};
 
 	context.subscriptions.push(
@@ -166,6 +173,24 @@ export function activate(context: vscode.ExtensionContext): void {
 			if (pick) {
 				await pick.action();
 			}
+		}),
+		vscode.commands.registerCommand('hunk-review.addComment', async (reply) => {
+			const { thread } = (reply ?? {}) as { thread?: vscode.CommentThread };
+			if (!thread) {
+				return;
+			}
+			const summary = await vscode.window.showInputBox({
+				prompt: 'Комментарий к строке (уйдёт в hunk-сессию)',
+			});
+			if (!summary) {
+				return;
+			}
+			const file = relPathFromRoot(thread.uri);
+			const line = ((thread.range?.start.line) ?? 0) + 1;
+			await store.add(file, { newLine: line }, summary);
+			await hasPending();
+			await bridge.refresh();
+			void refreshDecorations();
 		}),
 	);
 
@@ -201,7 +226,13 @@ function registerStubCommands(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('hunk-review.stopSession', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.showSessionTerminal', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.menu', noWorkspace),
+		vscode.commands.registerCommand('hunk-review.addComment', noWorkspace),
 	);
+}
+
+function relPathFromRoot(uri: vscode.Uri): string {
+	const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+	return uri.fsPath.startsWith(root) ? uri.fsPath.slice(root.length + 1) : uri.fsPath;
 }
 
 function splitOnce(s: string, sep: string): [string, string] {

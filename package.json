@@ -38,6 +38,11 @@
         "command": "hunk-review.menu",
         "title": "hunk: Меню ревью",
         "category": "hunk-review"
+      },
+      {
+        "command": "hunk-review.addComment",
+        "title": "hunk: Добавить комментарий",
+        "category": "hunk-review"
       }
     ]
   },

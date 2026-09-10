@@ -81,6 +81,7 @@ export class CommentBridge {
 			'hunk-review.comments',
 			'Hunk Review',
 		);
+		this.controller.options = { prompt: 'Добавить комментарий к строке (отправится в hunk)' };
 		context.subscriptions.push(this.controller, { dispose: () => this.dispose() });
 	}
 
