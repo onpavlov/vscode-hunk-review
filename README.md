@@ -1,71 +1,77 @@
-# hunk-review README
+# hunk-review
 
-This is the README for your extension "hunk-review". After writing up a brief description, we recommend including the following sections.
+Комментируйте дифф в VS Code и отправляйте комментарии в живую hunk-сессию,
+где их может читать кодинг-агент.
 
-## Features
+## Что делает расширение
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
-
-For example if there is an image subfolder under your extension project workspace:
-
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+- Открывает ревью незакоммиченных изменений (рабочее дерево + staging) в
+  нативных diff-редакторах VS Code; изменённые строки подсвечиваются.
+- Позволяет оставлять комментарии к изменённым строкам: клик «+» → текст в
+  поле треда → кнопка «hunk: Добавить комментарий».
+- Хранит комментарии локально в `.hunk-review/comments.json`
+  (store-and-forward: можно комментировать и без запущенного hunk).
+- «Отправить комментарии агенту» — отправляет pending-комментарии батчем в
+  живую hunk-сессию; если сессии нет, запускает её в терминале
+  («hunk review session»).
+- Подхватывает ответы агента и заметки из hunk в треды VS Code (ответы —
+  reply в треде исходного комментария).
+- Останавливает сессию, когда рабочее дерево стало чистым (закоммичено или
+  отменено), либо по команде «Остановить hunk сессию».
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+- [hunk](https://hunk.dev) CLI в `PATH` (проверено с 0.21.1) — см.
+  [install docs](https://www.hunk.dev/docs/start/install/).
+- VS Code 1.136+.
+
+## Запуск dev-версии
+
+```bash
+git clone <repo-url> hunk-review
+cd hunk-review
+npm install
+```
+
+Дальше в VS Code:
+
+1. `File → Open Folder…` → папка репозитория.
+2. `F5` (конфигурация «Run Extension») — соберёт бандл (watch-задача) и
+   откроет окно **Extension Development Host**.
+3. Окно EDH открывается **без папки**: внутри него `File → Open Folder…` →
+   проект с незакоммиченными изменениями.
+4. `Cmd+Shift+P` → `Developer: Reload Window` — чтобы расширение
+   активировалось уже с открытой папкой.
+5. `Cmd+Shift+P` → «hunk: Открыть ревью рабочего дерева».
+
+Тесты: `npm test` (поднимает реальный VS Code; smoke-тест сам скипается,
+если живой hunk-сессии нет). Типы и линт: `npm run check-types`,
+`npm run lint`. Сборка: `npm run compile`, продакшен-пакет: `npm run package`.
+
+## Типичный цикл ревью
+
+1. «hunk: Открыть ревью рабочего дерева» → diff в VS Code.
+2. «+» на изменённой строке → текст → «hunk: Добавить комментарий»
+   (статус в статус-баре: `hunk: N pending`).
+3. «hunk: Отправить комментарии агенту» → откроется терминал с hunk TUI,
+   комментарии уедут батчем и станут `you (sent)`.
+4. Ответы агента приезжают в треды автоматически (~5 с).
+5. Закоммитили/отменили изменения — фоновая сессия останавливается сама.
 
 ## Extension Settings
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+Пока настроек нет.
 
 ## Known Issues
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+- Формат JSON `hunk session * --json` может меняться между версиями hunk;
+  расширение рассчитано на 0.21.x.
+- Комментарии к строкам, которых больше нет в диффе, помечаются `stale`
+  при следующей отправке.
 
 ## Release Notes
 
-Users appreciate release notes as you update your extension.
+### 0.1.0
 
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+Первый рабочий релиз: ревью рабочего дерева, комментарии в hunk-сессию,
+синхронизация ответов агента, автостоп сессии.
