@@ -190,14 +190,15 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		}),
 		vscode.commands.registerCommand('hunk-review.addComment', async (reply) => {
-			const { thread } = (reply ?? {}) as { thread?: vscode.CommentThread };
+			const { thread, text } = (reply ?? {}) as { thread?: vscode.CommentThread; text?: string };
 			if (!thread) {
 				return;
 			}
-			const summary = await vscode.window.showInputBox({
-				prompt: 'Комментарий к строке (уйдёт в hunk-сессию)',
-			});
+			const summary = (text ?? '').trim();
 			if (!summary) {
+				void vscode.window.showInformationMessage(
+					'Введите текст комментария в поле треда и нажмите кнопку ещё раз.',
+				);
 				return;
 			}
 			const file = relPathFromRoot(thread.uri);

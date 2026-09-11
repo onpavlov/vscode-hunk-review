@@ -92,7 +92,10 @@ export class CommentBridge {
 			'hunk-review.comments',
 			'Hunk Review',
 		);
-		this.controller.options = { prompt: 'Добавить комментарий к строке (отправится в hunk)' };
+		this.controller.options = {
+			prompt: 'Введите текст и нажмите «hunk: Добавить комментарий»',
+			placeHolder: 'Текст комментария уйдёт в hunk-сессию',
+		};
 
 		// Provide commenting ranges only on lines that were actually changed.
 		// Falls back to the whole file if the diff map has no entry for it.
