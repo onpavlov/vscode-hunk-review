@@ -13,6 +13,8 @@ export const vscodeTerminalFactory: TerminalFactory = (cwd, onDispose) => {
 	const terminal = vscode.window.createTerminal({
 		name: 'hunk review session',
 		cwd,
+		// Прячем терминал, чтобы запуск hunk diff не крал фокус у редактора.
+		hideFromUser: true,
 		// Запускаем TUI как процесс терминала; без этого открывается пустой shell
 		// и hunk никогда не стартует.
 		shellPath: 'hunk',
@@ -102,11 +104,15 @@ export class SessionManager implements vscode.Disposable {
 		}
 	}
 
-	showTerminal(): void {
+	async connectToSession(): Promise<void> {
 		if (this.terminal) {
 			this.terminal.show();
+			return;
+		}
+		if (await this.findSession()) {
+			this.toaster.info('hunk-сессия запущена вне VS Code — терминал недоступен');
 		} else {
-			this.toaster.info('Фоновая hunk-сессия не запущена');
+			this.toaster.info('hunk-сессия не запущена');
 		}
 	}
 

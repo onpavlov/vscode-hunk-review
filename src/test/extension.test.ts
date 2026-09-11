@@ -16,7 +16,7 @@ suite('extension activation', () => {
 			'hunk-review.openDiff',
 			'hunk-review.sendComments',
 			'hunk-review.stopSession',
-			'hunk-review.showSessionTerminal',
+			'hunk-review.connectToSession',
 			'hunk-review.menu',
 		]) {
 			assert.ok(commands.includes(id), `missing command ${id}`);

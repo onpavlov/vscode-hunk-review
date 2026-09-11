@@ -168,11 +168,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			sync.stop();
 			return sessionManager.stopSession('остановлено пользователем');
 		}),
-		vscode.commands.registerCommand('hunk-review.showSessionTerminal', () => {
-			// Скрытый терминал показываем через встроенный панельный механизм:
-			// SessionManager хранит терминал; expose через getter добавлен в Task 5.
-			sessionManager.showTerminal();
-		}),
+		vscode.commands.registerCommand('hunk-review.connectToSession', () =>
+			sessionManager.connectToSession(),
+		),
 		vscode.commands.registerCommand('hunk-review.menu', async () => {
 			const pendingCount = await store.pendingCount();
 			const items: Array<vscode.QuickPickItem & { action: () => Promise<void> | void }> = [
@@ -181,7 +179,7 @@ export function activate(context: vscode.ExtensionContext): void {
 					label: `$(comment) Отправить комментарии агенту (${pendingCount})`,
 					action: () => sendComments(),
 				},
-				{ label: '$(terminal) Показать терминал сессии', action: () => sessionManager.showTerminal() },
+				{ label: '$(plug) Подключиться к сессии', action: () => sessionManager.connectToSession() },
 				{ label: '$(close) Остановить hunk сессию', action: () => sessionManager.stopSession('остановлено пользователем') },
 			];
 			const pick = await vscode.window.showQuickPick(items, { title: 'hunk review' });
@@ -279,7 +277,7 @@ function registerStubCommands(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('hunk-review.openDiff', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.sendComments', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.stopSession', noWorkspace),
-		vscode.commands.registerCommand('hunk-review.showSessionTerminal', noWorkspace),
+		vscode.commands.registerCommand('hunk-review.connectToSession', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.menu', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.addComment', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.editComment', noWorkspace),

@@ -101,6 +101,9 @@ interface HunkComment extends vscode.Comment {
 export class CommentBridge {
 	private controller?: vscode.CommentController;
 	private threadByKey = new Map<string, vscode.CommentThread>();
+	// Очередь рефрешей: конкурентные вызовы (sendComments + onDidChange)
+	// без сериализации создают дубли тредов — осиротевшие копии остаются в UI.
+	private refreshChain: Promise<void> = Promise.resolve();
 
 	constructor(
 		private readonly store: CommentStore,
@@ -137,7 +140,13 @@ export class CommentBridge {
 		context.subscriptions.push(this.controller, { dispose: () => this.dispose() });
 	}
 
-	async refresh(): Promise<void> {
+	refresh(): Promise<void> {
+		const run = this.refreshChain.then(() => this.doRefresh());
+		this.refreshChain = run.catch(() => undefined);
+		return run;
+	}
+
+	private async doRefresh(): Promise<void> {
 		if (!this.controller) {
 			return;
 		}

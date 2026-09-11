@@ -30,8 +30,8 @@
         "category": "hunk-review"
       },
       {
-        "command": "hunk-review.showSessionTerminal",
-        "title": "hunk: Показать терминал сессии",
+        "command": "hunk-review.connectToSession",
+        "title": "hunk: Подключиться к сессии",
         "category": "hunk-review"
       },
       {

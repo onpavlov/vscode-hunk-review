@@ -76,4 +76,54 @@ suite('SessionManager', () => {
 		assert.strictEqual(disposed, true);
 		assert.strictEqual(sm.currentSession(), undefined);
 	});
+
+	test('connectToSession shows terminal when one is owned', async () => {
+		let shown = 0;
+		const factory: TerminalFactory = () =>
+			({ dispose: () => undefined, show: () => { shown += 1; } } as never);
+		const cli = fakeCli([]);
+		let findCalls = 0;
+		cli.findSession = async (r: string) => {
+			findCalls += 1;
+			return findCalls > 1 ? { sessionId: 's9', repoRoot: r } : undefined;
+		};
+		const toasts: string[] = [];
+		const sm = new SessionManager(
+			cli as never,
+			root,
+			factory,
+			{ info: (m: string) => toasts.push(m), error: () => undefined },
+			async () => false,
+		);
+		await sm.ensureSession();
+		await sm.connectToSession();
+		assert.strictEqual(shown, 1);
+		assert.strictEqual(toasts.length, 0);
+	});
+
+	test('connectToSession toasts when session runs outside VS Code', async () => {
+		const toasts: string[] = [];
+		const sm = new SessionManager(
+			fakeCli([{ sessionId: 's1', repoRoot: root }]) as never,
+			root,
+			() => ({ dispose: () => undefined } as never),
+			{ info: (m: string) => toasts.push(m), error: () => undefined },
+			async () => false,
+		);
+		await sm.connectToSession();
+		assert.deepStrictEqual(toasts, ['hunk-сессия запущена вне VS Code — терминал недоступен']);
+	});
+
+	test('connectToSession toasts when no session exists', async () => {
+		const toasts: string[] = [];
+		const sm = new SessionManager(
+			fakeCli([]) as never,
+			root,
+			() => ({ dispose: () => undefined } as never),
+			{ info: (m: string) => toasts.push(m), error: () => undefined },
+			async () => false,
+		);
+		await sm.connectToSession();
+		assert.deepStrictEqual(toasts, ['hunk-сессия не запущена']);
+	});
 });
