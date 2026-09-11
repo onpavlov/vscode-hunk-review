@@ -26,13 +26,25 @@ export function buildThreadDescriptors(
 ): ThreadDescriptor[] {
 	const threads = new Map<string, ThreadDescriptor>();
 	const keyOf = (file: string, line: number) => `${file}:${line}`;
+	// Эхо: наши же комментарии возвращаются из comment list как notes.
+	// Фильтруем по sessionCommentId и по (файл, строка, текст) на случай дрейфа id.
+	const ownIds = new Set(
+		stored.map((c) => c.sessionCommentId).filter((id): id is string => !!id),
+	);
+	const ownEcho = new Set(
+		stored
+			.filter((c) => c.status !== 'pending')
+			.map((c) =>
+				keyOf(c.filePath, c.target.newLine ?? c.target.oldLine ?? 1) + '|' + c.summary,
+			),
+	);
 
 	for (const c of stored) {
 		const line = c.target.newLine ?? c.target.oldLine ?? 1;
 		const key = keyOf(c.filePath, line);
 		const existing = threads.get(key);
 		const descriptor: ThreadCommentDescriptor = {
-			author: 'you',
+			author: `you (${c.status})`,
 			body: c.summary,
 			readOnly: c.status !== 'pending',
 			storeId: c.status === 'pending' ? c.id : undefined,
@@ -52,6 +64,9 @@ export function buildThreadDescriptors(
 
 	for (const n of notes) {
 		const line = n.newRange?.[0] ?? 1;
+		if (ownIds.has(n.noteId) || ownEcho.has(keyOf(n.filePath, line) + '|' + n.body)) {
+			continue;
+		}
 		const key = keyOf(n.filePath, line);
 		const author = n.source === 'agent' ? 'hunk (agent)' : 'hunk (note)';
 		const descriptor: ThreadCommentDescriptor = { author, body: n.body, readOnly: true };

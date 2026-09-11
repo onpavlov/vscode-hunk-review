@@ -29,8 +29,25 @@ suite('buildThreadDescriptors', () => {
 		const desc = buildThreadDescriptors([stored({ status: 'sent' })], [note]);
 		assert.strictEqual(desc.length, 1);
 		assert.strictEqual(desc[0].comments.length, 2);
-		assert.strictEqual(desc[0].comments[0].author, 'you');
+		assert.strictEqual(desc[0].comments[0].author, 'you (sent)');
 		assert.strictEqual(desc[0].comments[1].author, 'hunk (agent)');
+	});
+
+	test('our echoed comment from the session is filtered out', () => {
+		const echo: HunkNote = {
+			noteId: 'mcp:9',
+			source: 'agent',
+			filePath: 'src/a.ts',
+			hunkIndex: 0,
+			newRange: [10, 10],
+			body: 'ours',
+			createdAt: '2026-09-10T00:00:01Z',
+			editable: false,
+		};
+		const desc = buildThreadDescriptors([stored({ status: 'sent', sessionCommentId: 'mcp:9' })], [echo]);
+		assert.strictEqual(desc.length, 1);
+		assert.strictEqual(desc[0].comments.length, 1);
+		assert.strictEqual(desc[0].comments[0].author, 'you (sent)');
 	});
 
 	test('agent note without our thread creates read-only thread', () => {
