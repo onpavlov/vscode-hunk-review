@@ -132,7 +132,25 @@ export class HunkCli {
 		const { stdout } = await this.run(
 			['session', 'comment', 'list', '--repo', repoRoot, '--type', type, '--json'],
 		);
-		return parseJson<NoteListResult>(stdout).comments;
+		const raw = parseJson<{ comments?: Array<Record<string, unknown>> }>(stdout).comments ?? [];
+		return raw.map((c) => this.normalizeNote(c));
+	}
+
+	// Формы полей `comment list --json` гуляют между версиями/источниками:
+	// noteId|commentId, newRange|line, body|summary, source — опционален.
+	private normalizeNote(c: Record<string, unknown>): HunkNote {
+		const line = (c['line'] ?? 1) as number;
+		return {
+			noteId: (c['noteId'] ?? c['commentId'] ?? '') as string,
+			parentId: c['parentId'] as string | undefined,
+			source: (c['source'] ?? 'agent') as string,
+			filePath: (c['filePath'] ?? '') as string,
+			hunkIndex: (c['hunkIndex'] ?? 0) as number,
+			newRange: (c['newRange'] ?? [line, line]) as [number, number],
+			body: (c['body'] ?? c['summary'] ?? '') as string,
+			createdAt: (c['createdAt'] ?? '') as string,
+			editable: (c['editable'] ?? false) as boolean,
+		};
 	}
 
 	async sessionReview(repoRoot: string): Promise<HunkReviewResult> {

@@ -44,6 +44,7 @@ export interface ApplyResult {
 
 export interface HunkNote {
 	noteId: string;
+	parentId?: string;
 	source: string;
 	filePath: string;
 	hunkIndex: number;

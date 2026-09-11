@@ -257,6 +257,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	void hasPending();
 	void bridge.activate(context);
+	// Сессия могла быть запущена раньше (или перезапущена сессия терминала):
+	// при активации ищем живую сессию и включаем поллинг комментариев.
+	void sessionManager.findSession().then((s) => {
+		if (s) {
+			sync.start(5_000);
+		}
+	});
 }
 
 export function deactivate(): void {

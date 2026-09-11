@@ -62,12 +62,18 @@ export function buildThreadDescriptors(
 		}
 	}
 
+	const notePos = new Map(
+		notes.map((n) => [n.noteId, { file: n.filePath, line: n.newRange?.[0] ?? 1 }]),
+	);
 	for (const n of notes) {
-		const line = n.newRange?.[0] ?? 1;
-		if (ownIds.has(n.noteId) || ownEcho.has(keyOf(n.filePath, line) + '|' + n.body)) {
+		// Ответы агента (parentId) клеятся к треду родительской заметки.
+		const anchor = n.parentId ? (notePos.get(n.parentId) ?? null) : null;
+		const file = anchor?.file ?? n.filePath;
+		const line = anchor?.line ?? n.newRange?.[0] ?? 1;
+		if (ownIds.has(n.noteId) || ownEcho.has(keyOf(file, line) + '|' + n.body)) {
 			continue;
 		}
-		const key = keyOf(n.filePath, line);
+		const key = keyOf(file, line);
 		const author = n.source === 'agent' ? 'hunk (agent)' : 'hunk (note)';
 		const descriptor: ThreadCommentDescriptor = { author, body: n.body, readOnly: true };
 		const existing = threads.get(key);
@@ -75,9 +81,9 @@ export function buildThreadDescriptors(
 			existing.comments.push(descriptor);
 		} else {
 			threads.set(key, {
-				file: n.filePath,
+				file,
 				start: line,
-				end: n.newRange?.[1] ?? line,
+				end: n.parentId ? line : (n.newRange?.[1] ?? line),
 				threadKey: key,
 				comments: [descriptor],
 			});
