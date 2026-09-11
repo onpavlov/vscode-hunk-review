@@ -11,12 +11,9 @@ export type TerminalFactory = (cwd: string, onDispose: () => void) => vscode.Ter
 
 export const vscodeTerminalFactory: TerminalFactory = (cwd, onDispose) => {
 	const terminal = vscode.window.createTerminal({
-		name: 'hunk-review session',
+		name: 'hunk review session',
 		cwd,
-		hideFromUser: true,
 	});
-	terminal.show(); // TUI должен быть прикреплён к pty; окно можно закрыть
-	terminal.hide();
 	void onDispose;
 	return terminal;
 };
@@ -62,7 +59,8 @@ export class SessionManager implements vscode.Disposable {
 		});
 		const registered = await this.waitForRegistration();
 		if (!registered) {
-			this.terminal.dispose();
+			// Терминал мог закрыться сам (крэш TUI) и обнулить this.terminal через onDispose.
+			this.terminal?.dispose();
 			this.terminal = undefined;
 			throw new Error('hunk-сессия не зарегистрировалась за 10 секунд');
 		}
