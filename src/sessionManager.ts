@@ -13,6 +13,10 @@ export const vscodeTerminalFactory: TerminalFactory = (cwd, onDispose) => {
 	const terminal = vscode.window.createTerminal({
 		name: 'hunk review session',
 		cwd,
+		// Запускаем TUI как процесс терминала; без этого открывается пустой shell
+		// и hunk никогда не стартует.
+		shellPath: 'hunk',
+		shellArgs: ['diff'],
 	});
 	void onDispose;
 	return terminal;
