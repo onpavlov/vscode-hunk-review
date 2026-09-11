@@ -204,6 +204,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			const file = relPathFromRoot(thread.uri);
 			const line = ((thread.range?.start.line) ?? 0) + 1;
 			await store.add(file, { newLine: line }, summary);
+			// Закрываем черновой тред («Start discussion»), иначе он остаётся
+			// открытым рядом с тредом, пересобранным из стора.
+			thread.dispose();
 			await hasPending();
 			await bridge.refresh();
 			void refreshDecorations();
