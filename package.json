@@ -47,12 +47,26 @@
       {
         "command": "hunk-review.editComment",
         "title": "hunk: Изменить комментарий",
-        "category": "hunk-review"
+        "category": "hunk-review",
+        "icon": "$(edit)"
       },
       {
         "command": "hunk-review.deleteComment",
         "title": "hunk: Удалить комментарий",
-        "category": "hunk-review"
+        "category": "hunk-review",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "hunk-review.saveComment",
+        "title": "hunk: Сохранить комментарий",
+        "category": "hunk-review",
+        "icon": "$(check)"
+      },
+      {
+        "command": "hunk-review.cancelEditComment",
+        "title": "hunk: Отменить редактирование",
+        "category": "hunk-review",
+        "icon": "$(close)"
       }
     ],
     "menus": {
@@ -63,16 +77,28 @@
           "when": "commentController == hunk-review.comments"
         }
       ],
-      "comments/comment/context": [
+      "comments/comment/title": [
         {
           "command": "hunk-review.editComment",
-          "group": "inline@1",
-          "when": "commentController == hunk-review.comments && comment.storeId"
+          "group": "group@1",
+          "when": "commentController == hunk-review.comments && comment == pending"
         },
         {
           "command": "hunk-review.deleteComment",
+          "group": "group@2",
+          "when": "commentController == hunk-review.comments && comment == pending"
+        }
+      ],
+      "comments/comment/context": [
+        {
+          "command": "hunk-review.saveComment",
+          "group": "inline@1",
+          "when": "commentController == hunk-review.comments && comment == editing"
+        },
+        {
+          "command": "hunk-review.cancelEditComment",
           "group": "inline@2",
-          "when": "commentController == hunk-review.comments && comment.storeId"
+          "when": "commentController == hunk-review.comments && comment == editing"
         }
       ]
     }

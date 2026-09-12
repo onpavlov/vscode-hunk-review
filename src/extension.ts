@@ -5,6 +5,7 @@ import { createHunkCli } from './hunkCli.js';
 import { CommentStore, ensureGitignore } from './commentStore.js';
 import { DiffService } from './diffService.js';
 import { CommentBridge } from './commentBridge.js';
+import type { HunkComment } from './commentBridge.js';
 import { SessionManager } from './sessionManager.js';
 import { HunkSync } from './hunkSync.js';
 import { createDecorations } from './decorations.js';
@@ -258,21 +259,38 @@ export function activate(context: vscode.ExtensionContext): void {
 			await bridge.refresh();
 			void refreshDecorations();
 		}),
-		vscode.commands.registerCommand('hunk-review.editComment', async (comment: { storeId?: string }) => {
+		vscode.commands.registerCommand('hunk-review.editComment', (comment: HunkComment) => {
+			const thread = comment?.parent;
+			if (!comment?.storeId || !thread) {
+				return;
+			}
+			// Switch just this one comment into VS Code's native editing textarea;
+			// nothing is written to the store until Save.
+			thread.comments = thread.comments.map((c) =>
+				c === comment
+					? ({ ...c, mode: vscode.CommentMode.Editing, contextValue: 'editing' } as HunkComment)
+					: c,
+			);
+		}),
+		vscode.commands.registerCommand('hunk-review.saveComment', async (comment: HunkComment) => {
 			const id = comment?.storeId;
 			if (!id) {
 				return;
 			}
-			const summary = await vscode.window.showInputBox({
-				prompt: 'Изменить комментарий',
-			});
+			const summary = (typeof comment.body === 'string' ? comment.body : comment.body.value).trim();
 			if (!summary) {
+				void vscode.window.showInformationMessage('Комментарий не может быть пустым.');
 				return;
 			}
 			await store.update(id, { summary });
 			await bridge.refresh();
 		}),
-		vscode.commands.registerCommand('hunk-review.deleteComment', async (comment: { storeId?: string }) => {
+		vscode.commands.registerCommand('hunk-review.cancelEditComment', async () => {
+			// Store wasn't touched — a full refresh rebuilds threads from it,
+			// discarding the in-progress edit and restoring the original text.
+			await bridge.refresh();
+		}),
+		vscode.commands.registerCommand('hunk-review.deleteComment', async (comment: HunkComment) => {
 			const id = comment?.storeId;
 			if (!id) {
 				return;
@@ -338,6 +356,8 @@ function registerStubCommands(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('hunk-review.menu', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.addComment', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.editComment', noWorkspace),
+		vscode.commands.registerCommand('hunk-review.saveComment', noWorkspace),
+		vscode.commands.registerCommand('hunk-review.cancelEditComment', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.deleteComment', noWorkspace),
 	);
 }

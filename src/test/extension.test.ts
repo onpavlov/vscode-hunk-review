@@ -18,6 +18,11 @@ suite('extension activation', () => {
 			'hunk-review.stopSession',
 			'hunk-review.connectToSession',
 			'hunk-review.menu',
+			'hunk-review.addComment',
+			'hunk-review.editComment',
+			'hunk-review.saveComment',
+			'hunk-review.cancelEditComment',
+			'hunk-review.deleteComment',
 		]) {
 			assert.ok(commands.includes(id), `missing command ${id}`);
 		}

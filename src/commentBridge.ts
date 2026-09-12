@@ -10,6 +10,8 @@ export interface ThreadCommentDescriptor {
 	readOnly: boolean;
 	/** store id, set only for pending comments owned by the user */
 	storeId?: string;
+	/** menu gate for edit/delete buttons; set only for pending comments owned by the user */
+	contextValue?: 'pending';
 }
 
 export interface ThreadDescriptor {
@@ -48,6 +50,7 @@ export function buildThreadDescriptors(
 			body: c.summary,
 			readOnly: c.status !== 'pending',
 			storeId: c.status === 'pending' ? c.id : undefined,
+			contextValue: c.status === 'pending' ? 'pending' : undefined,
 		};
 		if (existing) {
 			existing.comments.push(descriptor);
@@ -93,9 +96,12 @@ export function buildThreadDescriptors(
 	return [...threads.values()];
 }
 
-/** Comment with an attached storeId so edit/delete commands can identify it. */
-interface HunkComment extends vscode.Comment {
+/** Comment with an attached storeId/parent so edit/delete/save commands can identify and mutate it. */
+export interface HunkComment extends vscode.Comment {
 	storeId?: string;
+	contextValue?: 'pending' | 'editing';
+	/** back-reference to the owning thread, filled in right after creation */
+	parent?: vscode.CommentThread;
 }
 
 export class CommentBridge {
@@ -168,14 +174,18 @@ export class CommentBridge {
 					(c): HunkComment => ({
 						body: c.body,
 						author: { name: c.author },
-						// Pending comments are shown as plain rows (Preview), not editing boxes.
-						// Sent/stale/notes are also Preview.
+						// All comments start as plain rows (Preview); editComment switches
+						// one comment into Editing on demand (see extension.ts).
 						mode: vscode.CommentMode.Preview,
 						storeId: c.storeId,
+						contextValue: c.contextValue,
 					}),
 				),
 			);
 			thread.canReply = false;
+			// Back-reference so edit/save/cancel commands can locate and mutate
+			// their own thread's comments array without a full store-based refresh.
+			thread.comments = thread.comments.map((c) => ({ ...c, parent: thread }) as HunkComment);
 			this.threadByKey.set(d.threadKey, thread);
 		}
 	}

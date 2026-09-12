@@ -83,4 +83,18 @@ suite('buildThreadDescriptors', () => {
 		assert.strictEqual(desc[1].comments[0].readOnly, true);
 		assert.strictEqual(desc[2].comments[0].readOnly, true);
 	});
+
+	test('only pending comments get the edit/delete menu gate', () => {
+		const desc = buildThreadDescriptors(
+			[
+				stored({ id: 'p', target: { newLine: 1 }, status: 'pending' }),
+				stored({ id: 's', target: { newLine: 2 }, status: 'sent' }),
+				stored({ id: 'x', target: { newLine: 3 }, status: 'stale' }),
+			],
+			[],
+		);
+		assert.strictEqual(desc[0].comments[0].contextValue, 'pending');
+		assert.strictEqual(desc[1].comments[0].contextValue, undefined);
+		assert.strictEqual(desc[2].comments[0].contextValue, undefined);
+	});
 });
