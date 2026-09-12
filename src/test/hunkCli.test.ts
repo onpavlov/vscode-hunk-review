@@ -50,6 +50,17 @@ suite('HunkCli', () => {
 		assert.strictEqual(res.applied.length, 1);
 	});
 
+	test('reload swaps session contents with "-- diff" tail', async () => {
+		let capturedArgs: string[] = [];
+		const runner: HunkRunner = async (_file, args) => {
+			capturedArgs = args;
+			return { stdout: 'Reloaded repo /tmp/r (1 files).', stderr: '' };
+		};
+		const cli = createHunkCli(runner);
+		await cli.reload('/tmp/r');
+		assert.deepStrictEqual(capturedArgs, ['session', 'reload', '--repo', '/tmp/r', '--', 'diff']);
+	});
+
 	test('non-zero exit raises HunkCommandError with stderr', async () => {
 		const runner: HunkRunner = async () => {
 			const err = new Error('spawn failed') as Error & { code: number; stderr: string };

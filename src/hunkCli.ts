@@ -177,7 +177,9 @@ export class HunkCli {
 	}
 
 	async reload(repoRoot: string): Promise<void> {
-		await this.run(['session', 'reload', '--repo', repoRoot]);
+		// reload требует хвостовую подкоманду (`-- diff`): без неё CLI валидирует
+		// аргументы и падает, содержимое сессии не меняется.
+		await this.run(['session', 'reload', '--repo', repoRoot, '--', 'diff']);
 	}
 }
 

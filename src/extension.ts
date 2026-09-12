@@ -8,6 +8,10 @@ import { CommentBridge } from './commentBridge.js';
 import { SessionManager } from './sessionManager.js';
 import { HunkSync } from './hunkSync.js';
 import { createDecorations } from './decorations.js';
+import { createDebouncer } from './debounce.js';
+import { formatStatusText } from './statusText.js';
+import { findStaleCommentIds, hunksToChangedLines } from './staleComments.js';
+import type { LineRange } from './diffService.js';
 
 export function activate(context: vscode.ExtensionContext): void {
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -21,7 +25,9 @@ export function activate(context: vscode.ExtensionContext): void {
 	const cli = createHunkCli();
 	const store = new CommentStore(path.join(root, '.hunk-review'));
 	const diff = new DiffService();
-	const sync = new HunkSync(cli, root);
+	const sync = new HunkSync(cli, root, {
+		isSessionAlive: () => cli.findSession(root).then((s) => s !== undefined),
+	});
 	const bridge = new CommentBridge(
 		store,
 		() =>
@@ -34,103 +40,132 @@ export function activate(context: vscode.ExtensionContext): void {
 	const decorations = createDecorations();
 	context.subscriptions.push(decorations);
 
-	const refreshDecorations = async () => {
-		decorations.update(await diff.getChangedLines());
+	const refreshDecorations = async (changed?: Map<string, LineRange[]>) => {
+		decorations.update(changed ?? (await diff.getChangedLines()));
 	};
 
 	const hasPending = async () => {
 		const n = await store.pendingCount();
 		await vscode.commands.executeCommand('setContext', 'hunk-review.hasPending', n > 0);
-		statusBar.text = n > 0 ? `$(eye) hunk: ${n} pending` : '$(eye) hunk';
+		const sessionAlive = sessionManager.currentSession() !== undefined;
+		statusBar.text = formatStatusText(n, sessionAlive);
+		statusBar.tooltip = sessionAlive
+			? 'hunk-сессия активна (клик — меню)'
+			: 'hunk-сессия не запущена (клик — меню)';
 	};
 
 	const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 	statusBar.command = 'hunk-review.menu';
 	statusBar.show();
 
+	// Сериализуем операции с сессией: reload из вотчера не должен пересекаться
+	// с отправкой комментариев (apply валидирует батч против текущего diff).
+	let sessionOps: Promise<unknown> = Promise.resolve();
+	const serializeSessionOp = <T>(op: () => Promise<T>): Promise<T> => {
+		const run = sessionOps.then(op, op);
+		sessionOps = run.then(
+			() => undefined,
+			() => undefined,
+		);
+		return run;
+	};
+
 	const sendComments = async () => {
 		const pending = await store.pending();
 		if (pending.length === 0) {
 			return;
 		}
-		try {
-			await sessionManager.ensureSession();
-			const all = await cli.listSessions();
-			const sameRepo = all.filter(
-				(s) =>
-					fs.realpathSync.native(s.repoRoot) === fs.realpathSync.native(root),
-			);
-			if (sameRepo.length > 1) {
-				void vscode.window.showInformationMessage(
-					`Найдено несколько hunk-сессий этого репозитория — используем первую.`,
+		await serializeSessionOp(async () => {
+			try {
+				await sessionManager.ensureSession();
+				const all = await cli.listSessions();
+				const sameRepo = all.filter(
+					(s) =>
+						fs.realpathSync.native(s.repoRoot) === fs.realpathSync.native(root),
 				);
-			}
-			const result = await cli.applyComments(root, {
-				comments: pending.map((c) => ({
-					filePath: c.filePath,
-					newLine: c.target.newLine,
-					oldLine: c.target.oldLine,
-					summary: c.summary,
-				})),
-			});
-			// Guard: applied count must match pending count before flipping statuses.
-			if (result.applied.length !== pending.length) {
-				void vscode.window.showErrorMessage(
-					`Ошибка синхронизации комментариев: ожидалось ${pending.length} применённых, получено ${result.applied.length}. Статусы не обновлены.`,
-				);
-			} else {
-				// Correlate by filePath+line where possible; fall back to index.
-				for (let i = 0; i < pending.length; i += 1) {
-					await store.update(pending[i].id, {
-						status: 'sent',
-						sessionCommentId: result.applied[i]?.commentId,
-					});
+				if (sameRepo.length > 1) {
+					void vscode.window.showInformationMessage(
+						`Найдено несколько hunk-сессий этого репозитория — используем первую.`,
+					);
 				}
+				const result = await cli.applyComments(root, {
+					comments: pending.map((c) => ({
+						filePath: c.filePath,
+						newLine: c.target.newLine,
+						oldLine: c.target.oldLine,
+						summary: c.summary,
+					})),
+				});
+				// Guard: applied count must match pending count before flipping statuses.
+				if (result.applied.length !== pending.length) {
+					void vscode.window.showErrorMessage(
+						`Ошибка синхронизации комментариев: ожидалось ${pending.length} применённых, получено ${result.applied.length}. Статусы не обновлены.`,
+					);
+				} else {
+					// Correlate by filePath+line where possible; fall back to index.
+					for (let i = 0; i < pending.length; i += 1) {
+						await store.update(pending[i].id, {
+							status: 'sent',
+							sessionCommentId: result.applied[i]?.commentId,
+						});
+					}
+				}
+				void vscode.window.showInformationMessage(
+					`Отправлено комментариев: ${result.applied.length}. hunk-сессия работает в фоне.`,
+				);
+				await sync.pollOnce();
+				sync.start(5_000); // пока сессия жива — опрашиваем комментарии агента
+				await bridge.refresh();
+			} catch (err) {
+				await markStaleOnApplyFailure(err);
+				void vscode.window.showErrorMessage(`Не удалось отправить комментарии: ${String(err)}`);
 			}
-			void vscode.window.showInformationMessage(
-				`Отправлено комментариев: ${result.applied.length}. hunk-сессия работает в фоне.`,
-			);
-			await sync.pollOnce();
-			sync.start(5_000); // пока сессия жива — опрашиваем комментарии агента
-			await bridge.refresh();
-		} catch (err) {
-			await markStaleOnApplyFailure(err);
-			void vscode.window.showErrorMessage(`Не удалось отправить комментарии: ${String(err)}`);
-		}
+		});
 		await hasPending();
 	};
 
+	const markStaleComments = async (changed: Map<string, LineRange[]>) => {
+		for (const id of findStaleCommentIds(await store.pending(), changed)) {
+			await store.update(id, { status: 'stale' });
+		}
+	};
+
 	const markStaleOnApplyFailure = async (err: unknown) => {
-		const session = sessionManager.currentSession();
-		if (!session) {
+		if (!sessionManager.currentSession()) {
 			return;
 		}
 		try {
-			const review = await cli.sessionReview(root);
-			const valid = new Set(
-				review.files.flatMap((f) =>
-					f.hunks.map((h) => `${f.path}:${h.newStart}-${h.newStart + h.newLines - 1}`),
-				),
-			);
-			for (const c of await store.pending()) {
-				const line = c.target.newLine ?? c.target.oldLine ?? 1;
-				const inDiff = [...valid].some((key) => {
-					const [file, range] = splitOnce(key, ':');
-					if (file !== c.filePath) {
-						return false;
-					}
-					const [start, end] = range.split('-').map(Number);
-					return line >= start && line <= end;
-				});
-				if (!inDiff) {
-					await store.update(c.id, { status: 'stale' });
-				}
-			}
+			await markStaleComments(hunksToChangedLines(await cli.sessionReview(root)));
 		} catch {
 			// диагностика stale недоступна — не критично
 		}
 		void err;
 	};
+
+	// Живое обновление: сохранения и git-операции ведут к перерасчёту диффа,
+	// декораций, разметке stale и (при живой сессии) reload содержимого hunk.
+	// Пустой дифф пропускаем: reload без изменений отключает сессию от демона
+	// (проверено на 0.21.x), чистое дерево обрабатывает автостоп.
+	const onWorktreeChanged = async () => {
+		const changed = await diff.getChangedLines();
+		await refreshDecorations(changed);
+		if (changed.size > 0) {
+			await markStaleComments(changed);
+			if (sessionManager.currentSession()) {
+				try {
+					await cli.reload(root);
+					await sync.pollOnce();
+				} catch {
+					// reload не критичен — поллинг и следующая отправка останутся рабочими
+				}
+			}
+		}
+		await hasPending();
+		await bridge.refresh();
+	};
+	const worktreeWatcher = createDebouncer(2_000, () =>
+		serializeSessionOp(onWorktreeChanged),
+	);
 
 	const openDiff = async () => {
 		const repo = diff.getRepo();
@@ -162,11 +197,18 @@ export function activate(context: vscode.ExtensionContext): void {
 		sync.onDidChange(() => {
 			void bridge.refresh();
 		}),
+		sync.onSessionLost(() => {
+			sessionManager.clearSession();
+			void hasPending();
+			void vscode.window.showInformationMessage('hunk-сессия завершилась');
+		}),
+		worktreeWatcher,
 		vscode.commands.registerCommand('hunk-review.openDiff', openDiff),
 		vscode.commands.registerCommand('hunk-review.sendComments', sendComments),
-		vscode.commands.registerCommand('hunk-review.stopSession', () => {
+		vscode.commands.registerCommand('hunk-review.stopSession', async () => {
 			sync.stop();
-			return sessionManager.stopSession('остановлено пользователем');
+			await sessionManager.stopSession('остановлено пользователем');
+			await hasPending();
 		}),
 		vscode.commands.registerCommand('hunk-review.connectToSession', () =>
 			sessionManager.connectToSession(),
@@ -180,7 +222,14 @@ export function activate(context: vscode.ExtensionContext): void {
 					action: () => sendComments(),
 				},
 				{ label: '$(plug) Подключиться к сессии', action: () => sessionManager.connectToSession() },
-				{ label: '$(close) Остановить hunk сессию', action: () => sessionManager.stopSession('остановлено пользователем') },
+				{
+					label: '$(close) Остановить hunk сессию',
+					action: async () => {
+						sync.stop();
+						await sessionManager.stopSession('остановлено пользователем');
+						await hasPending();
+					},
+				},
 			];
 			const pick = await vscode.window.showQuickPick(items, { title: 'hunk review' });
 			if (pick) {
@@ -235,16 +284,24 @@ export function activate(context: vscode.ExtensionContext): void {
 		}),
 	);
 
-	// Автостоп при чистом рабочем дереве.
-	const gitApi = diff.getRepo();
-	if (gitApi) {
-		context.subscriptions.push(
-			vscode.workspace.onDidChangeWorkspaceFolders(() => undefined),
-		);
+	// Триггеры живого обновления: сохранения файлов и git-операции
+	// (commit/stash/checkout) идут в один дебаунс-обработчик.
+	context.subscriptions.push(
+		vscode.workspace.onDidSaveTextDocument(() => worktreeWatcher.trigger()),
+	);
+	const repo = diff.getRepo();
+	if (repo?.state.onDidChange) {
+		context.subscriptions.push(repo.state.onDidChange(() => worktreeWatcher.trigger()));
 	}
-	// Простейший триггер: сохранение документа и интервал.
+	// Автостоп при чистом рабочем дереве — периодической проверкой.
 	const autoStopTimer = setInterval(() => {
-		void sessionManager.maybeAutoStop().then(hasPending);
+		void sessionManager.maybeAutoStop().then(() => {
+			// Сессия остановлена — не оставляем поллинг собирать ошибки.
+			if (!sessionManager.currentSession()) {
+				sync.stop();
+			}
+			return hasPending();
+		});
 	}, 5_000);
 	context.subscriptions.push(new vscode.Disposable(() => clearInterval(autoStopTimer)));
 
@@ -288,9 +345,4 @@ function registerStubCommands(context: vscode.ExtensionContext): void {
 function relPathFromRoot(uri: vscode.Uri): string {
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
 	return uri.fsPath.startsWith(root) ? uri.fsPath.slice(root.length + 1) : uri.fsPath;
-}
-
-function splitOnce(s: string, sep: string): [string, string] {
-	const i = s.indexOf(sep);
-	return i < 0 ? [s, ''] : [s.slice(0, i), s.slice(i + 1)];
 }

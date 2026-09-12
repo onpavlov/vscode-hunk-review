@@ -86,10 +86,15 @@ export class SessionManager implements vscode.Disposable {
 		return undefined;
 	}
 
-	async stopSession(reason?: string): Promise<void> {
+	/** Сбрасывает состояние сессии без уведомлений (сессия потеряна снаружи). */
+	clearSession(): void {
 		this.terminal?.dispose();
 		this.terminal = undefined;
 		this.session = undefined;
+	}
+
+	async stopSession(reason?: string): Promise<void> {
+		this.clearSession();
 		if (reason) {
 			this.toaster.info(`hunk-сессия остановлена: ${reason}`);
 		}

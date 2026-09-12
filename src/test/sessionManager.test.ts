@@ -77,6 +77,29 @@ suite('SessionManager', () => {
 		assert.strictEqual(sm.currentSession(), undefined);
 	});
 
+	test('clearSession disposes owned terminal and clears state', async () => {
+		let disposed = false;
+		const factory: TerminalFactory = () =>
+			({ dispose: () => { disposed = true; } } as never);
+		const cli = fakeCli([]);
+		let findCalls = 0;
+		cli.findSession = async (r: string) => {
+			findCalls += 1;
+			return findCalls > 1 ? { sessionId: 's9', repoRoot: r } : undefined;
+		};
+		const sm = new SessionManager(
+			cli as never,
+			root,
+			factory,
+			{ info: () => undefined, error: () => undefined },
+			async () => false,
+		);
+		await sm.ensureSession();
+		sm.clearSession();
+		assert.strictEqual(disposed, true);
+		assert.strictEqual(sm.currentSession(), undefined);
+	});
+
 	test('connectToSession shows terminal when one is owned', async () => {
 		let shown = 0;
 		const factory: TerminalFactory = () =>

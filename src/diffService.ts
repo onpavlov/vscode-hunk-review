@@ -12,6 +12,8 @@ export interface GitRepositoryLike {
 	state: {
 		workingTreeChanges: Array<{ uri: vscode.Uri }>;
 		indexChanges: Array<{ uri: vscode.Uri }>;
+		/** Реальный API git-расширения событие несёт; в тестовых фейках может отсутствовать. */
+		onDidChange?: vscode.Event<unknown>;
 	};
 }
 

@@ -18,6 +18,13 @@ where a coding agent can read them.
   terminal with the running hunk TUI so you can interact with the session.
 - Picks up agent replies and notes from hunk into VS Code threads (replies
   land in the thread of the original comment).
+- Keeps the review live: saving files or git operations (commit/stash/checkout)
+  refresh the highlights and threads, reload the hunk session contents so the
+  agent reviews fresh code, and mark comments whose lines drifted out of the
+  diff as `stale`.
+- Detects a session that died outside VS Code (or when the diff became empty),
+  stops polling, clears the state and shows session liveness in the status bar
+  (`hunk • live`).
 - Stops the session when the working tree becomes clean (committed or
   reverted), or via the "Остановить hunk сессию" command.
 

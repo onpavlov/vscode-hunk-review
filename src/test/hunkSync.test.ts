@@ -49,4 +49,113 @@ suite('HunkSync', () => {
 			}, 200);
 		});
 	});
+
+	suite('session liveness', () => {
+		function failingCli(calls: { value: number }) {
+			return {
+				listNotes: async () => {
+					calls.value += 1;
+					throw new Error('comment list failed');
+				},
+			};
+		}
+
+		test('fires onSessionLost once after repeated failed polls on dead session', async () => {
+			let lost = 0;
+			const sync = new HunkSync(failingCli({ value: 0 }) as never, '/tmp/r', {
+				isSessionAlive: async () => false,
+			});
+			sync.onSessionLost(() => {
+				lost += 1;
+			});
+			await sync.pollOnce();
+			assert.strictEqual(lost, 0, 'first miss must not report loss yet');
+			await sync.pollOnce();
+			assert.strictEqual(lost, 1, 'second miss must report loss');
+			await sync.pollOnce();
+			assert.strictEqual(lost, 1, 'loss must be reported only once');
+		});
+
+		test('does not report loss while session is alive', async () => {
+			let lost = 0;
+			const sync = new HunkSync(failingCli({ value: 0 }) as never, '/tmp/r', {
+				isSessionAlive: async () => true,
+			});
+			sync.onSessionLost(() => {
+				lost += 1;
+			});
+			await sync.pollOnce();
+			await sync.pollOnce();
+			await sync.pollOnce();
+			assert.strictEqual(lost, 0);
+		});
+
+		test('successful poll resets miss counter', async () => {
+			let lost = 0;
+			let alive = false;
+			let failing = true;
+			const cli = {
+				listNotes: async () => {
+					if (failing) {
+						throw new Error('down');
+					}
+					return [];
+				},
+			};
+			const sync = new HunkSync(cli as never, '/tmp/r', {
+				isSessionAlive: async () => alive,
+			});
+			sync.onSessionLost(() => {
+				lost += 1;
+			});
+			await sync.pollOnce();
+			failing = false;
+			await sync.pollOnce();
+			failing = true;
+			alive = false;
+			await sync.pollOnce();
+			assert.strictEqual(lost, 0, 'counter must reset after a successful poll');
+			await sync.pollOnce();
+			assert.strictEqual(lost, 1);
+		});
+
+		test('stops scheduled polling after reporting loss', function () {
+			this.timeout(3000);
+			const calls = { value: 0 };
+			const sync = new HunkSync(failingCli(calls) as never, '/tmp/r', {
+				isSessionAlive: async () => false,
+			});
+			let lost = 0;
+			sync.onSessionLost(() => {
+				lost += 1;
+			});
+			sync.start(20);
+			return new Promise<void>((resolve) => {
+				setTimeout(() => {
+					assert.strictEqual(lost, 1);
+					const atLoss = calls.value;
+					setTimeout(() => {
+						assert.ok(calls.value <= atLoss + 1, `polls continued after loss: ${atLoss} -> ${calls.value}`);
+						resolve();
+					}, 200);
+				}, 300);
+			});
+		});
+
+		test('start after loss resets the lost flag', async () => {
+			let lost = 0;
+			const sync = new HunkSync(failingCli({ value: 0 }) as never, '/tmp/r', {
+				isSessionAlive: async () => false,
+			});
+			sync.onSessionLost(() => {
+				lost += 1;
+			});
+			await sync.pollOnce();
+			await sync.pollOnce();
+			sync.start(60_000);
+			await sync.pollOnce();
+			await sync.pollOnce();
+			assert.strictEqual(lost, 2, 'new lifecycle must be able to report loss again');
+		});
+	});
 });
