@@ -134,7 +134,7 @@ suite('SessionManager', () => {
 			async () => false,
 		);
 		await sm.connectToSession();
-		assert.deepStrictEqual(toasts, ['hunk-сессия запущена вне VS Code — терминал недоступен']);
+		assert.deepStrictEqual(toasts, ['hunk session is running outside VS Code — terminal unavailable']);
 	});
 
 	test('connectToSession toasts when no session exists', async () => {
@@ -147,6 +147,6 @@ suite('SessionManager', () => {
 			async () => false,
 		);
 		await sm.connectToSession();
-		assert.deepStrictEqual(toasts, ['hunk-сессия не запущена']);
+		assert.deepStrictEqual(toasts, ['hunk session is not running']);
 	});
 });

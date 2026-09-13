@@ -13,7 +13,7 @@ VS Code extension "hunk-review": lets you comment on uncommitted diffs in native
 - `npm run package` — production build (minified, no sourcemaps)
 - `npm run check-types` / `npm run lint` — run individually
 - `npm test` — runs `vscode-test`; `pretest` first compiles tests (`tsc -p . --outDir out`) and runs the full compile+lint. Tests live in `src/test/*.test.ts`, compiled to `out/`, discovered via `.vscode-test.mjs`. Launches a real VS Code (Electron) instance — no single-file test runner is configured. `smoke.test.ts` skips itself when no live hunk session is available.
-- Manual run: `F5` in VS Code opens an Extension Development Host **without a folder**; open a project with uncommitted changes inside it, then `Developer: Reload Window` so the extension activates with the folder present, then run "hunk: Открыть ревью рабочего дерева".
+- Manual run: `F5` in VS Code opens an Extension Development Host **without a folder**; open a project with uncommitted changes inside it, then `Developer: Reload Window` so the extension activates with the folder present, then run "hunk: Open Working Tree Review" (shows in Russian as "hunk: Открыть ревью рабочего дерева" when the host's display language is `ru`).
 
 ## Architecture
 
@@ -45,4 +45,4 @@ Collaborators (`src/*.ts`):
 - `package.json` `overrides` pins `diff` and `serialize-javascript` — preserve these when touching dependencies.
 - New user-facing commands must be declared in both `package.json` (`contributes.commands`) and `vscode.commands.registerCommand` in `src/extension.ts`, with matching `hunk-review.`-prefixed IDs. `activationEvents` is empty — activation is implicit via command registration.
 - esbuild bundles everything except `vscode` (external) — don't assume other node built-ins/deps are available unbundled at runtime.
-- UI strings (command titles, messages) are in Russian; keep this consistent when adding UI-facing text.
+- Localized (l10n): UI strings in `src/*.ts` are English literals wrapped in `vscode.l10n.t('...', ...args)` (positional args use `{0}`, `{1}`); `contributes.commands` titles in `package.json` are `%key%` refs resolved via `package.nls.json`. Russian translations live in `l10n/bundle.l10n.ru.json` (runtime strings) and `package.nls.ru.json` (command titles) — every new `l10n.t()` key or `%key%` needs an entry in both the English and Russian files, and the Russian entry's key text must match the English source string byte-for-byte. To add another language, drop in `l10n/bundle.l10n.<locale>.json` and `package.nls.<locale>.json` — no source changes needed. Code comments stay Russian (repo convention, not user-facing).

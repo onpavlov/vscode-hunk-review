@@ -11,60 +11,61 @@
   ],
   "activationEvents": [],
   "main": "./dist/extension.js",
+  "l10n": "./l10n",
   "contributes": {
     "commands": [
       {
         "command": "hunk-review.openDiff",
-        "title": "hunk: Открыть ревью рабочего дерева",
+        "title": "%command.openDiff.title%",
         "category": "hunk-review"
       },
       {
         "command": "hunk-review.sendComments",
-        "title": "hunk: Отправить комментарии агенту",
+        "title": "%command.sendComments.title%",
         "category": "hunk-review",
         "enablement": "hunk-review.hasPending"
       },
       {
         "command": "hunk-review.stopSession",
-        "title": "hunk: Остановить hunk сессию",
+        "title": "%command.stopSession.title%",
         "category": "hunk-review"
       },
       {
         "command": "hunk-review.connectToSession",
-        "title": "hunk: Подключиться к сессии",
+        "title": "%command.connectToSession.title%",
         "category": "hunk-review"
       },
       {
         "command": "hunk-review.menu",
-        "title": "hunk: Меню ревью",
+        "title": "%command.menu.title%",
         "category": "hunk-review"
       },
       {
         "command": "hunk-review.addComment",
-        "title": "hunk: Добавить комментарий",
+        "title": "%command.addComment.title%",
         "category": "hunk-review"
       },
       {
         "command": "hunk-review.editComment",
-        "title": "hunk: Изменить комментарий",
+        "title": "%command.editComment.title%",
         "category": "hunk-review",
         "icon": "$(edit)"
       },
       {
         "command": "hunk-review.deleteComment",
-        "title": "hunk: Удалить комментарий",
+        "title": "%command.deleteComment.title%",
         "category": "hunk-review",
         "icon": "$(trash)"
       },
       {
         "command": "hunk-review.saveComment",
-        "title": "hunk: Сохранить комментарий",
+        "title": "%command.saveComment.title%",
         "category": "hunk-review",
         "icon": "$(check)"
       },
       {
         "command": "hunk-review.cancelEditComment",
-        "title": "hunk: Отменить редактирование",
+        "title": "%command.cancelEditComment.title%",
         "category": "hunk-review",
         "icon": "$(close)"
       }

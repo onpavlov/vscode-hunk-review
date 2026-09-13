@@ -57,7 +57,7 @@ export class SessionManager implements vscode.Disposable {
 			return existing;
 		}
 		if (await this.isWorktreeClean()) {
-			throw new Error('Рабочее дерево чистое — ревьюить нечего');
+			throw new Error(vscode.l10n.t('Working tree is clean — nothing to review'));
 		}
 		this.terminal = this.terminalFactory(this.repoRoot, () => {
 			this.session = undefined;
@@ -68,7 +68,7 @@ export class SessionManager implements vscode.Disposable {
 			// Терминал мог закрыться сам (крэш TUI) и обнулить this.terminal через onDispose.
 			this.terminal?.dispose();
 			this.terminal = undefined;
-			throw new Error('hunk-сессия не зарегистрировалась за 10 секунд');
+			throw new Error(vscode.l10n.t('hunk session did not register within 10 seconds'));
 		}
 		this.session = registered;
 		return registered;
@@ -96,7 +96,7 @@ export class SessionManager implements vscode.Disposable {
 	async stopSession(reason?: string): Promise<void> {
 		this.clearSession();
 		if (reason) {
-			this.toaster.info(`hunk-сессия остановлена: ${reason}`);
+			this.toaster.info(vscode.l10n.t('hunk session stopped: {0}', reason));
 		}
 	}
 
@@ -105,7 +105,7 @@ export class SessionManager implements vscode.Disposable {
 			return;
 		}
 		if (await this.isWorktreeClean()) {
-			await this.stopSession('изменения закоммичены или отменены');
+			await this.stopSession(vscode.l10n.t('changes committed or discarded'));
 		}
 	}
 
@@ -115,9 +115,9 @@ export class SessionManager implements vscode.Disposable {
 			return;
 		}
 		if (await this.findSession()) {
-			this.toaster.info('hunk-сессия запущена вне VS Code — терминал недоступен');
+			this.toaster.info(vscode.l10n.t('hunk session is running outside VS Code — terminal unavailable'));
 		} else {
-			this.toaster.info('hunk-сессия не запущена');
+			this.toaster.info(vscode.l10n.t('hunk session is not running'));
 		}
 	}
 

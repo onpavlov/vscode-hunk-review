@@ -52,8 +52,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		const sessionAlive = sessionManager.currentSession() !== undefined;
 		statusBar.text = formatStatusText(n, sessionAlive);
 		statusBar.tooltip = sessionAlive
-			? 'hunk-сессия активна (клик — меню)'
-			: 'hunk-сессия не запущена (клик — меню)';
+			? vscode.l10n.t('hunk session is active (click for menu)')
+			: vscode.l10n.t('hunk session is not running (click for menu)');
 	};
 
 	const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -87,7 +87,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				);
 				if (sameRepo.length > 1) {
 					void vscode.window.showInformationMessage(
-						`Найдено несколько hunk-сессий этого репозитория — используем первую.`,
+						vscode.l10n.t('Found several hunk sessions in this repository — using the first one.'),
 					);
 				}
 				const result = await cli.applyComments(root, {
@@ -101,7 +101,11 @@ export function activate(context: vscode.ExtensionContext): void {
 				// Guard: applied count must match pending count before flipping statuses.
 				if (result.applied.length !== pending.length) {
 					void vscode.window.showErrorMessage(
-						`Ошибка синхронизации комментариев: ожидалось ${pending.length} применённых, получено ${result.applied.length}. Статусы не обновлены.`,
+						vscode.l10n.t(
+							'Comment sync error: expected {0} applied, got {1}. Statuses not updated.',
+							pending.length,
+							result.applied.length,
+						),
 					);
 				} else {
 					// Correlate by filePath+line where possible; fall back to index.
@@ -113,14 +117,19 @@ export function activate(context: vscode.ExtensionContext): void {
 					}
 				}
 				void vscode.window.showInformationMessage(
-					`Отправлено комментариев: ${result.applied.length}. hunk-сессия работает в фоне.`,
+					vscode.l10n.t(
+						'Sent {0} comment(s). hunk session is running in the background.',
+						result.applied.length,
+					),
 				);
 				await sync.pollOnce();
 				sync.start(5_000); // пока сессия жива — опрашиваем комментарии агента
 				await bridge.refresh();
 			} catch (err) {
 				await markStaleOnApplyFailure(err);
-				void vscode.window.showErrorMessage(`Не удалось отправить комментарии: ${String(err)}`);
+				void vscode.window.showErrorMessage(
+					vscode.l10n.t('Failed to send comments: {0}', String(err)),
+				);
 			}
 		});
 		await hasPending();
@@ -177,12 +186,12 @@ export function activate(context: vscode.ExtensionContext): void {
 	const openDiff = async () => {
 		const repo = diff.getRepo();
 		if (!repo) {
-			void vscode.window.showErrorMessage('Git-репозиторий не найден');
+			void vscode.window.showErrorMessage(vscode.l10n.t('Git repository not found'));
 			return;
 		}
 		const changed = await diff.getChangedLines();
 		if (changed.newLines.size === 0) {
-			void vscode.window.showInformationMessage('Незакоммиченных изменений нет');
+			void vscode.window.showInformationMessage(vscode.l10n.t('No uncommitted changes'));
 			return;
 		}
 		await ensureGitignore(root);
@@ -207,14 +216,14 @@ export function activate(context: vscode.ExtensionContext): void {
 		sync.onSessionLost(() => {
 			sessionManager.clearSession();
 			void hasPending();
-			void vscode.window.showInformationMessage('hunk-сессия завершилась');
+			void vscode.window.showInformationMessage(vscode.l10n.t('hunk session ended'));
 		}),
 		worktreeWatcher,
 		vscode.commands.registerCommand('hunk-review.openDiff', openDiff),
 		vscode.commands.registerCommand('hunk-review.sendComments', sendComments),
 		vscode.commands.registerCommand('hunk-review.stopSession', async () => {
 			sync.stop();
-			await sessionManager.stopSession('остановлено пользователем');
+			await sessionManager.stopSession(vscode.l10n.t('stopped by user'));
 			await hasPending();
 		}),
 		vscode.commands.registerCommand('hunk-review.connectToSession', () =>
@@ -223,17 +232,20 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('hunk-review.menu', async () => {
 			const pendingCount = await store.pendingCount();
 			const items: Array<vscode.QuickPickItem & { action: () => Promise<void> | void }> = [
-				{ label: '$(git-compare) Открыть ревью', action: () => openDiff() },
+				{ label: `$(git-compare) ${vscode.l10n.t('Open review')}`, action: () => openDiff() },
 				{
-					label: `$(comment) Отправить комментарии агенту (${pendingCount})`,
+					label: `$(comment) ${vscode.l10n.t('Send comments to agent ({0})', pendingCount)}`,
 					action: () => sendComments(),
 				},
-				{ label: '$(plug) Подключиться к сессии', action: () => sessionManager.connectToSession() },
 				{
-					label: '$(close) Остановить hunk сессию',
+					label: `$(plug) ${vscode.l10n.t('Connect to session')}`,
+					action: () => sessionManager.connectToSession(),
+				},
+				{
+					label: `$(close) ${vscode.l10n.t('Stop hunk session')}`,
 					action: async () => {
 						sync.stop();
-						await sessionManager.stopSession('остановлено пользователем');
+						await sessionManager.stopSession(vscode.l10n.t('stopped by user'));
 						await hasPending();
 					},
 				},
@@ -251,7 +263,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			const summary = (text ?? '').trim();
 			if (!summary) {
 				void vscode.window.showInformationMessage(
-					'Введите текст комментария в поле треда и нажмите кнопку ещё раз.',
+					vscode.l10n.t('Enter comment text in the thread field and click the button again.'),
 				);
 				return;
 			}
@@ -287,7 +299,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 			const summary = (typeof comment.body === 'string' ? comment.body : comment.body.value).trim();
 			if (!summary) {
-				void vscode.window.showInformationMessage('Комментарий не может быть пустым.');
+				void vscode.window.showInformationMessage(vscode.l10n.t('Comment cannot be empty.'));
 				return;
 			}
 			await store.update(id, { summary });
@@ -353,7 +365,7 @@ export function deactivate(): void {
 
 function registerStubCommands(context: vscode.ExtensionContext): void {
 	const noWorkspace = () => {
-		void vscode.window.showErrorMessage('Откройте рабочую папку для использования hunk-review');
+		void vscode.window.showErrorMessage(vscode.l10n.t('Open a workspace folder to use hunk-review'));
 	};
 	
 	context.subscriptions.push(

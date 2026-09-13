@@ -3,11 +3,16 @@ import type { HunkNote, StoredComment } from './types.js';
 import type { CommentStore } from './commentStore.js';
 import type { ChangedLines } from './diffService.js';
 
-const STATUS_LABEL: Record<StoredComment['status'], string | undefined> = {
-	pending: 'ожидает отправки',
-	sent: 'отправлено',
-	stale: 'строка изменилась',
-};
+function statusLabel(status: StoredComment['status']): string | undefined {
+	switch (status) {
+		case 'pending':
+			return vscode.l10n.t('waiting to send');
+		case 'sent':
+			return vscode.l10n.t('sent');
+		case 'stale':
+			return vscode.l10n.t('line changed');
+	}
+}
 
 export interface ThreadCommentDescriptor {
 	author: string;
@@ -65,9 +70,9 @@ export function buildThreadDescriptors(
 		const key = keyOf(c.filePath, side, line);
 		const existing = threads.get(key);
 		const descriptor: ThreadCommentDescriptor = {
-			author: 'Вы',
+			author: vscode.l10n.t('You'),
 			avatar: 'user',
-			label: STATUS_LABEL[c.status],
+			label: statusLabel(c.status),
 			body: c.summary,
 			timestamp: new Date(c.createdAt),
 			readOnly: c.status !== 'pending',
@@ -103,10 +108,11 @@ export function buildThreadDescriptors(
 			continue;
 		}
 		const key = keyOf(file, 'new', line);
+		const isAgent = n.source === 'agent';
 		const descriptor: ThreadCommentDescriptor = {
-			author: 'hunk',
+			author: isAgent ? vscode.l10n.t('AI Agent') : 'hunk',
 			avatar: 'agent',
-			label: n.source === 'agent' ? undefined : 'заметка',
+			label: isAgent ? undefined : vscode.l10n.t('note'),
 			body: n.body,
 			timestamp: new Date(n.createdAt),
 			readOnly: true,
@@ -161,8 +167,8 @@ export class CommentBridge {
 			'Hunk Review',
 		);
 		this.controller.options = {
-			prompt: 'Введите текст и нажмите «hunk: Добавить комментарий»',
-			placeHolder: 'Текст комментария уйдёт в hunk-сессию',
+			prompt: vscode.l10n.t('Type the text and run "hunk: Add Comment"'),
+			placeHolder: vscode.l10n.t('The comment text will be sent to the hunk session'),
 		};
 
 		// Provide commenting ranges only on lines that were actually changed.
@@ -216,7 +222,9 @@ export class CommentBridge {
 				new vscode.Range(d.start - 1, 0, d.end - 1, Number.MAX_SAFE_INTEGER),
 				d.comments.map(
 					(c): HunkComment => ({
-						body: c.body,
+						// Markdown, чтобы ответы агента сохраняли форматирование (**жирный**, `код`, списки) —
+						// строкой это превращалось в сырые звёздочки и обратные кавычки.
+						body: new vscode.MarkdownString(c.body),
 						author: { name: c.author, iconPath: this.avatarUri(c.avatar) },
 						label: c.label,
 						timestamp: c.timestamp,

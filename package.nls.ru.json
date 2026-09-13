@@ -1,0 +1,12 @@
+{
+	"command.openDiff.title": "hunk: Открыть ревью рабочего дерева",
+	"command.sendComments.title": "hunk: Отправить комментарии агенту",
+	"command.stopSession.title": "hunk: Остановить hunk сессию",
+	"command.connectToSession.title": "hunk: Подключиться к сессии",
+	"command.menu.title": "hunk: Меню ревью",
+	"command.addComment.title": "hunk: Добавить комментарий",
+	"command.editComment.title": "hunk: Изменить комментарий",
+	"command.deleteComment.title": "hunk: Удалить комментарий",
+	"command.saveComment.title": "hunk: Сохранить комментарий",
+	"command.cancelEditComment.title": "hunk: Отменить редактирование"
+}

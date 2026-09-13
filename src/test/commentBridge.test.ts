@@ -29,9 +29,9 @@ suite('buildThreadDescriptors', () => {
 		const desc = buildThreadDescriptors([stored({ status: 'sent' })], [note]);
 		assert.strictEqual(desc.length, 1);
 		assert.strictEqual(desc[0].comments.length, 2);
-		assert.strictEqual(desc[0].comments[0].author, 'Вы');
-		assert.strictEqual(desc[0].comments[0].label, 'отправлено');
-		assert.strictEqual(desc[0].comments[1].author, 'hunk');
+		assert.strictEqual(desc[0].comments[0].author, 'You');
+		assert.strictEqual(desc[0].comments[0].label, 'sent');
+		assert.strictEqual(desc[0].comments[1].author, 'AI Agent');
 		assert.strictEqual(desc[0].comments[1].label, undefined);
 		assert.strictEqual(desc[0].collapsed, true);
 	});
@@ -50,7 +50,7 @@ suite('buildThreadDescriptors', () => {
 		const desc = buildThreadDescriptors([stored({ status: 'sent', sessionCommentId: 'mcp:9' })], [echo]);
 		assert.strictEqual(desc.length, 1);
 		assert.strictEqual(desc[0].comments.length, 1);
-		assert.strictEqual(desc[0].comments[0].author, 'Вы');
+		assert.strictEqual(desc[0].comments[0].author, 'You');
 	});
 
 	test('agent note without our thread creates read-only thread', () => {
@@ -70,7 +70,7 @@ suite('buildThreadDescriptors', () => {
 		assert.strictEqual(desc[0].start, 3);
 		assert.strictEqual(desc[0].end, 4);
 		assert.strictEqual(desc[0].comments[0].readOnly, true);
-		assert.strictEqual(desc[0].comments[0].label, 'заметка');
+		assert.strictEqual(desc[0].comments[0].label, 'note');
 		assert.strictEqual(desc[0].collapsed, true);
 	});
 
