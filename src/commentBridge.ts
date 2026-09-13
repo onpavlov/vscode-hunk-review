@@ -3,9 +3,20 @@ import type { HunkNote, StoredComment } from './types.js';
 import type { CommentStore } from './commentStore.js';
 import type { LineRange } from './diffService.js';
 
+const STATUS_LABEL: Record<StoredComment['status'], string | undefined> = {
+	pending: 'ожидает отправки',
+	sent: 'отправлено',
+	stale: 'строка изменилась',
+};
+
 export interface ThreadCommentDescriptor {
 	author: string;
+	/** avatar shown next to the author name */
+	avatar: 'user' | 'agent';
+	/** short badge next to the author name, e.g. a status or role hint */
+	label?: string;
 	body: string;
+	timestamp: Date;
 	/** undefined = pending (editable by user); true = sent/stale; false = editable hunk note (unused) */
 	readOnly: boolean;
 	/** store id, set only for pending comments owned by the user */
@@ -20,6 +31,8 @@ export interface ThreadDescriptor {
 	end: number;
 	threadKey: string;
 	comments: ThreadCommentDescriptor[];
+	/** collapse threads that have nothing left to act on, so the diff isn't wall-to-wall boxes */
+	collapsed: boolean;
 }
 
 export function buildThreadDescriptors(
@@ -46,14 +59,18 @@ export function buildThreadDescriptors(
 		const key = keyOf(c.filePath, line);
 		const existing = threads.get(key);
 		const descriptor: ThreadCommentDescriptor = {
-			author: `you (${c.status})`,
+			author: 'Вы',
+			avatar: 'user',
+			label: STATUS_LABEL[c.status],
 			body: c.summary,
+			timestamp: new Date(c.createdAt),
 			readOnly: c.status !== 'pending',
 			storeId: c.status === 'pending' ? c.id : undefined,
 			contextValue: c.status === 'pending' ? 'pending' : undefined,
 		};
 		if (existing) {
 			existing.comments.push(descriptor);
+			existing.collapsed &&= descriptor.readOnly;
 		} else {
 			threads.set(key, {
 				file: c.filePath,
@@ -61,6 +78,7 @@ export function buildThreadDescriptors(
 				end: line,
 				threadKey: key,
 				comments: [descriptor],
+				collapsed: descriptor.readOnly,
 			});
 		}
 	}
@@ -77,8 +95,14 @@ export function buildThreadDescriptors(
 			continue;
 		}
 		const key = keyOf(file, line);
-		const author = n.source === 'agent' ? 'hunk (agent)' : 'hunk (note)';
-		const descriptor: ThreadCommentDescriptor = { author, body: n.body, readOnly: true };
+		const descriptor: ThreadCommentDescriptor = {
+			author: 'hunk',
+			avatar: 'agent',
+			label: n.source === 'agent' ? undefined : 'заметка',
+			body: n.body,
+			timestamp: new Date(n.createdAt),
+			readOnly: true,
+		};
 		const existing = threads.get(key);
 		if (existing) {
 			existing.comments.push(descriptor);
@@ -89,6 +113,7 @@ export function buildThreadDescriptors(
 				end: n.parentId ? line : (n.newRange?.[1] ?? line),
 				threadKey: key,
 				comments: [descriptor],
+				collapsed: true,
 			});
 		}
 	}
@@ -106,6 +131,7 @@ export interface HunkComment extends vscode.Comment {
 
 export class CommentBridge {
 	private controller?: vscode.CommentController;
+	private extensionUri?: vscode.Uri;
 	private threadByKey = new Map<string, vscode.CommentThread>();
 	// Очередь рефрешей: конкурентные вызовы (sendComments + onDidChange)
 	// без сериализации создают дубли тредов — осиротевшие копии остаются в UI.
@@ -118,6 +144,7 @@ export class CommentBridge {
 	) {}
 
 	activate(context: vscode.ExtensionContext): void {
+		this.extensionUri = context.extensionUri;
 		this.controller = vscode.comments.createCommentController(
 			'hunk-review.comments',
 			'Hunk Review',
@@ -173,7 +200,9 @@ export class CommentBridge {
 				d.comments.map(
 					(c): HunkComment => ({
 						body: c.body,
-						author: { name: c.author },
+						author: { name: c.author, iconPath: this.avatarUri(c.avatar) },
+						label: c.label,
+						timestamp: c.timestamp,
 						// All comments start as plain rows (Preview); editComment switches
 						// one comment into Editing on demand (see extension.ts).
 						mode: vscode.CommentMode.Preview,
@@ -183,6 +212,11 @@ export class CommentBridge {
 				),
 			);
 			thread.canReply = false;
+			// Threads with nothing left to act on start collapsed, so the diff
+			// isn't wall-to-wall boxes for every already-sent or agent comment.
+			thread.collapsibleState = d.collapsed
+				? vscode.CommentThreadCollapsibleState.Collapsed
+				: vscode.CommentThreadCollapsibleState.Expanded;
 			// Back-reference so edit/save/cancel commands can locate and mutate
 			// their own thread's comments array without a full store-based refresh.
 			thread.comments = thread.comments.map((c) => ({ ...c, parent: thread }) as HunkComment);
@@ -192,6 +226,13 @@ export class CommentBridge {
 
 	dispose(): void {
 		this.threadByKey.clear();
+	}
+
+	private avatarUri(avatar: 'user' | 'agent'): vscode.Uri | undefined {
+		if (!this.extensionUri) {
+			return undefined;
+		}
+		return vscode.Uri.joinPath(this.extensionUri, 'media', `avatar-${avatar}.svg`);
 	}
 }
 

@@ -29,8 +29,11 @@ suite('buildThreadDescriptors', () => {
 		const desc = buildThreadDescriptors([stored({ status: 'sent' })], [note]);
 		assert.strictEqual(desc.length, 1);
 		assert.strictEqual(desc[0].comments.length, 2);
-		assert.strictEqual(desc[0].comments[0].author, 'you (sent)');
-		assert.strictEqual(desc[0].comments[1].author, 'hunk (agent)');
+		assert.strictEqual(desc[0].comments[0].author, 'Вы');
+		assert.strictEqual(desc[0].comments[0].label, 'отправлено');
+		assert.strictEqual(desc[0].comments[1].author, 'hunk');
+		assert.strictEqual(desc[0].comments[1].label, undefined);
+		assert.strictEqual(desc[0].collapsed, true);
 	});
 
 	test('our echoed comment from the session is filtered out', () => {
@@ -47,7 +50,7 @@ suite('buildThreadDescriptors', () => {
 		const desc = buildThreadDescriptors([stored({ status: 'sent', sessionCommentId: 'mcp:9' })], [echo]);
 		assert.strictEqual(desc.length, 1);
 		assert.strictEqual(desc[0].comments.length, 1);
-		assert.strictEqual(desc[0].comments[0].author, 'you (sent)');
+		assert.strictEqual(desc[0].comments[0].author, 'Вы');
 	});
 
 	test('agent note without our thread creates read-only thread', () => {
@@ -67,6 +70,8 @@ suite('buildThreadDescriptors', () => {
 		assert.strictEqual(desc[0].start, 3);
 		assert.strictEqual(desc[0].end, 4);
 		assert.strictEqual(desc[0].comments[0].readOnly, true);
+		assert.strictEqual(desc[0].comments[0].label, 'заметка');
+		assert.strictEqual(desc[0].collapsed, true);
 	});
 
 	test('pending and stale comments stay separate read-only rules', () => {
@@ -82,6 +87,11 @@ suite('buildThreadDescriptors', () => {
 		assert.strictEqual(desc[0].comments[0].readOnly, false);
 		assert.strictEqual(desc[1].comments[0].readOnly, true);
 		assert.strictEqual(desc[2].comments[0].readOnly, true);
+		// A pending thread stays open (it still needs the user's attention);
+		// already-sent or stale threads collapse to keep the diff compact.
+		assert.strictEqual(desc[0].collapsed, false);
+		assert.strictEqual(desc[1].collapsed, true);
+		assert.strictEqual(desc[2].collapsed, true);
 	});
 
 	test('only pending comments get the edit/delete menu gate', () => {
