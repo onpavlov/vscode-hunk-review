@@ -12,7 +12,7 @@ import { createDecorations } from './decorations.js';
 import { createDebouncer } from './debounce.js';
 import { formatStatusText } from './statusText.js';
 import { findStaleCommentIds, hunksToChangedLines } from './staleComments.js';
-import type { LineRange } from './diffService.js';
+import type { ChangedLines } from './diffService.js';
 
 export function activate(context: vscode.ExtensionContext): void {
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -34,6 +34,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		() =>
 			sessionManager.currentSession() ? Promise.resolve(sync.getNotes()) : Promise.resolve([]),
 		() => diff.getChangedLines(),
+		(file) => diff.getOriginalUri(vscode.Uri.joinPath(vscode.Uri.file(root), file)),
 	);
 	const sessionManager = new SessionManager(cli, root, undefined, undefined, () =>
 		diff.isWorktreeClean(),
@@ -41,7 +42,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	const decorations = createDecorations();
 	context.subscriptions.push(decorations);
 
-	const refreshDecorations = async (changed?: Map<string, LineRange[]>) => {
+	const refreshDecorations = async (changed?: ChangedLines) => {
 		decorations.update(changed ?? (await diff.getChangedLines()));
 	};
 
@@ -125,7 +126,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		await hasPending();
 	};
 
-	const markStaleComments = async (changed: Map<string, LineRange[]>) => {
+	const markStaleComments = async (changed: ChangedLines) => {
 		for (const id of findStaleCommentIds(await store.pending(), changed)) {
 			await store.update(id, { status: 'stale' });
 		}
@@ -136,7 +137,12 @@ export function activate(context: vscode.ExtensionContext): void {
 			return;
 		}
 		try {
-			await markStaleComments(hunksToChangedLines(await cli.sessionReview(root)));
+			// `session review` only reports new-side hunks — old-side staleness
+			// stays undetected here, caught later by the regular diff-based check.
+			await markStaleComments({
+				newLines: hunksToChangedLines(await cli.sessionReview(root)),
+				oldLines: new Map(),
+			});
 		} catch {
 			// диагностика stale недоступна — не критично
 		}
@@ -150,7 +156,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	const onWorktreeChanged = async () => {
 		const changed = await diff.getChangedLines();
 		await refreshDecorations(changed);
-		if (changed.size > 0) {
+		if (changed.newLines.size > 0) {
 			await markStaleComments(changed);
 			if (sessionManager.currentSession()) {
 				try {
@@ -175,12 +181,12 @@ export function activate(context: vscode.ExtensionContext): void {
 			return;
 		}
 		const changed = await diff.getChangedLines();
-		if (changed.size === 0) {
+		if (changed.newLines.size === 0) {
 			void vscode.window.showInformationMessage('Незакоммиченных изменений нет');
 			return;
 		}
 		await ensureGitignore(root);
-		for (const [file] of changed) {
+		for (const [file] of changed.newLines) {
 			const uri = vscode.Uri.joinPath(repo.rootUri, file);
 			await diff.openDiffForFile(uri);
 			break; // открываем первый изменённый файл; остальные — по клику из списка
@@ -251,7 +257,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 			const file = relPathFromRoot(thread.uri);
 			const line = ((thread.range?.start.line) ?? 0) + 1;
-			await store.add(file, { newLine: line }, summary);
+			// git-scheme = original (HEAD) side of a diff editor — the target is a deleted line.
+			const target = thread.uri.scheme === 'git' ? { oldLine: line } : { newLine: line };
+			await store.add(file, target, summary);
 			// Закрываем черновой тред («Start discussion»), иначе он остаётся
 			// открытым рядом с тредом, пересобранным из стора.
 			thread.dispose();

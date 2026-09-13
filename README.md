@@ -8,7 +8,9 @@ where a coding agent can read them.
 - Opens a review of uncommitted changes (working tree + staging) in native
   VS Code diff editors; changed lines are highlighted.
 - Lets you comment on changed lines: click "+" → type text in the thread
-  editor → press the "hunk: Добавить комментарий" button.
+  editor → press the "hunk: Добавить комментарий" button. This works on both
+  sides of the diff editor — added/context lines on the new (right) side and
+  deleted lines on the original/HEAD (left) side.
 - Stores comments locally in `.hunk-review/comments.json`
   (store-and-forward: you can comment even without hunk running).
 - "Send comments to agent" — sends pending comments as a batch to the live

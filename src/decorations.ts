@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { LineRange } from './diffService.js';
+import type { ChangedLines, LineRange } from './diffService.js';
 
 export function expandRanges(ranges: LineRange[]): number[] {
 	return ranges.flatMap((r) => {
@@ -12,7 +12,7 @@ export function expandRanges(ranges: LineRange[]): number[] {
 }
 
 export function createDecorations(): {
-	update(changedLines: Map<string, LineRange[]>): void;
+	update(changedLines: ChangedLines): void;
 	dispose(): void;
 } {
 	const reviewed = vscode.window.createTextEditorDecorationType({
@@ -25,7 +25,9 @@ export function createDecorations(): {
 		update(changedLines) {
 			for (const editor of vscode.window.visibleTextEditors) {
 				const file = relPath(editor.document.uri);
-				const ranges = changedLines.get(file) ?? [];
+				// git-scheme = original (HEAD) side of a diff editor, where deleted lines live.
+				const isOriginalSide = editor.document.uri.scheme === 'git';
+				const ranges = (isOriginalSide ? changedLines.oldLines : changedLines.newLines).get(file) ?? [];
 				editor.setDecorations(
 					reviewed,
 					expandRanges(ranges).map((line) => new vscode.Range(line - 1, 0, line - 1, 0)),

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { HunkNote, StoredComment } from './types.js';
 import type { CommentStore } from './commentStore.js';
-import type { LineRange } from './diffService.js';
+import type { ChangedLines } from './diffService.js';
 
 const STATUS_LABEL: Record<StoredComment['status'], string | undefined> = {
 	pending: 'ожидает отправки',
@@ -33,6 +33,8 @@ export interface ThreadDescriptor {
 	comments: ThreadCommentDescriptor[];
 	/** collapse threads that have nothing left to act on, so the diff isn't wall-to-wall boxes */
 	collapsed: boolean;
+	/** 'old' = anchored to a deleted line, rendered on the HEAD (original) side of the diff editor */
+	side: 'old' | 'new';
 }
 
 export function buildThreadDescriptors(
@@ -40,7 +42,8 @@ export function buildThreadDescriptors(
 	notes: HunkNote[],
 ): ThreadDescriptor[] {
 	const threads = new Map<string, ThreadDescriptor>();
-	const keyOf = (file: string, line: number) => `${file}:${line}`;
+	// Сторона включена в ключ: строка N в старой и в новой версии файла — разные якоря.
+	const keyOf = (file: string, side: 'old' | 'new', line: number) => `${file}:${side}:${line}`;
 	// Эхо: наши же комментарии возвращаются из comment list как notes.
 	// Фильтруем по sessionCommentId и по (файл, строка, текст) на случай дрейфа id.
 	const ownIds = new Set(
@@ -50,13 +53,16 @@ export function buildThreadDescriptors(
 		stored
 			.filter((c) => c.status !== 'pending')
 			.map((c) =>
-				keyOf(c.filePath, c.target.newLine ?? c.target.oldLine ?? 1) + '|' + c.summary,
+				keyOf(c.filePath, c.target.oldLine !== undefined ? 'old' : 'new', c.target.newLine ?? c.target.oldLine ?? 1) +
+				'|' +
+				c.summary,
 			),
 	);
 
 	for (const c of stored) {
-		const line = c.target.newLine ?? c.target.oldLine ?? 1;
-		const key = keyOf(c.filePath, line);
+		const side: 'old' | 'new' = c.target.oldLine !== undefined ? 'old' : 'new';
+		const line = side === 'old' ? c.target.oldLine! : c.target.newLine!;
+		const key = keyOf(c.filePath, side, line);
 		const existing = threads.get(key);
 		const descriptor: ThreadCommentDescriptor = {
 			author: 'Вы',
@@ -79,10 +85,12 @@ export function buildThreadDescriptors(
 				threadKey: key,
 				comments: [descriptor],
 				collapsed: descriptor.readOnly,
+				side,
 			});
 		}
 	}
 
+	// Агентские заметки всегда приходят с newRange — привязаны к новой стороне диффа.
 	const notePos = new Map(
 		notes.map((n) => [n.noteId, { file: n.filePath, line: n.newRange?.[0] ?? 1 }]),
 	);
@@ -91,10 +99,10 @@ export function buildThreadDescriptors(
 		const anchor = n.parentId ? (notePos.get(n.parentId) ?? null) : null;
 		const file = anchor?.file ?? n.filePath;
 		const line = anchor?.line ?? n.newRange?.[0] ?? 1;
-		if (ownIds.has(n.noteId) || ownEcho.has(keyOf(file, line) + '|' + n.body)) {
+		if (ownIds.has(n.noteId) || ownEcho.has(keyOf(file, 'new', line) + '|' + n.body)) {
 			continue;
 		}
-		const key = keyOf(file, line);
+		const key = keyOf(file, 'new', line);
 		const descriptor: ThreadCommentDescriptor = {
 			author: 'hunk',
 			avatar: 'agent',
@@ -114,6 +122,7 @@ export function buildThreadDescriptors(
 				threadKey: key,
 				comments: [descriptor],
 				collapsed: true,
+				side: 'new',
 			});
 		}
 	}
@@ -140,7 +149,9 @@ export class CommentBridge {
 	constructor(
 		private readonly store: CommentStore,
 		private readonly syncNotes: () => Promise<HunkNote[]>,
-		private readonly getChangedLines: () => Promise<Map<string, LineRange[]>>,
+		private readonly getChangedLines: () => Promise<ChangedLines>,
+		/** URI дореволюционной (HEAD) версии файла — где живут удалённые строки. */
+		private readonly originalUri: (file: string) => vscode.Uri,
 	) {}
 
 	activate(context: vscode.ExtensionContext): void {
@@ -156,11 +167,14 @@ export class CommentBridge {
 
 		// Provide commenting ranges only on lines that were actually changed.
 		// Falls back to the whole file if the diff map has no entry for it.
+		// The diff editor's original (HEAD) document — `git:`-scheme — carries
+		// the deleted lines, so it needs the old-side ranges, not the new-side ones.
 		this.controller.commentingRangeProvider = {
 			provideCommentingRanges: async (document) => {
 				const changedLines = await this.getChangedLines();
 				const rel = relPath(document.uri);
-				const ranges = changedLines.get(rel);
+				const isOriginalSide = document.uri.scheme === 'git';
+				const ranges = (isOriginalSide ? changedLines.oldLines : changedLines.newLines).get(rel);
 				if (!ranges || ranges.length === 0) {
 					// Fallback: allow the whole file.
 					const last = document.lineCount - 1;
@@ -193,7 +207,10 @@ export class CommentBridge {
 		const descriptors = buildThreadDescriptors(storeData.comments, notes);
 
 		for (const d of descriptors) {
-			const uri = vscode.Uri.joinPath(workspaceRoot(), d.file);
+			const uri =
+				d.side === 'old'
+					? this.originalUri(d.file)
+					: vscode.Uri.joinPath(workspaceRoot(), d.file);
 			const thread = this.controller.createCommentThread(
 				uri,
 				new vscode.Range(d.start - 1, 0, d.end - 1, Number.MAX_SAFE_INTEGER),

@@ -94,6 +94,26 @@ suite('buildThreadDescriptors', () => {
 		assert.strictEqual(desc[2].collapsed, true);
 	});
 
+	test('a comment on a deleted line is tagged with side "old"', () => {
+		const desc = buildThreadDescriptors([stored({ target: { oldLine: 7 } })], []);
+		assert.strictEqual(desc.length, 1);
+		assert.strictEqual(desc[0].side, 'old');
+		assert.strictEqual(desc[0].start, 7);
+	});
+
+	test('an old-line comment and a new-line comment on the same line number stay separate threads', () => {
+		const desc = buildThreadDescriptors(
+			[
+				stored({ id: 'o', target: { oldLine: 5 } }),
+				stored({ id: 'n', target: { newLine: 5 } }),
+			],
+			[],
+		);
+		assert.strictEqual(desc.length, 2);
+		assert.strictEqual(desc.find((d) => d.comments[0].storeId === 'o')?.side, 'old');
+		assert.strictEqual(desc.find((d) => d.comments[0].storeId === 'n')?.side, 'new');
+	});
+
 	test('only pending comments get the edit/delete menu gate', () => {
 		const desc = buildThreadDescriptors(
 			[

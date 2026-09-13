@@ -15,10 +15,22 @@ function comment(id: string, filePath: string, line: number, status: StoredComme
 	};
 }
 
+function deletedLineComment(id: string, filePath: string, line: number): StoredComment {
+	return {
+		id,
+		filePath,
+		target: { oldLine: line },
+		summary: `note ${id}`,
+		status: 'pending',
+		createdAt: '2026-09-12T00:00:00Z',
+	};
+}
+
 suite('findStaleCommentIds', () => {
-	const changed = new Map<string, LineRange[]>([
-		['a.ts', [{ start: 2, end: 4 }]],
-	]);
+	const changed = {
+		newLines: new Map<string, LineRange[]>([['a.ts', [{ start: 2, end: 4 }]]]),
+		oldLines: new Map<string, LineRange[]>(),
+	};
 
 	test('keeps pending comments whose line falls in a changed range', () => {
 		const ids = findStaleCommentIds([comment('c1', 'a.ts', 3)], changed);
@@ -53,6 +65,23 @@ suite('findStaleCommentIds', () => {
 			changed,
 		);
 		assert.deepStrictEqual(ids, ['out', 'other-file']);
+	});
+
+	test('deleted-line comment is checked against the old-side ranges, not new', () => {
+		const changedWithOld = {
+			newLines: new Map<string, LineRange[]>([['a.ts', [{ start: 2, end: 4 }]]]),
+			oldLines: new Map<string, LineRange[]>([['a.ts', [{ start: 8, end: 9 }]]]),
+		};
+		// line 3 is a new-side range, not an old-side one → stale despite matching newLines
+		assert.deepStrictEqual(
+			findStaleCommentIds([deletedLineComment('c1', 'a.ts', 3)], changedWithOld),
+			['c1'],
+		);
+		// line 8 falls inside the old-side range → kept
+		assert.deepStrictEqual(
+			findStaleCommentIds([deletedLineComment('c2', 'a.ts', 8)], changedWithOld),
+			[],
+		);
 	});
 
 	suite('hunksToChangedLines', () => {

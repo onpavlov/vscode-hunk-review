@@ -2,7 +2,9 @@ import * as assert from 'node:assert';
 import * as vscode from 'vscode';
 import { CommentBridge } from '../commentBridge.js';
 import type { CommentStore } from '../commentStore.js';
-import type { LineRange } from '../diffService.js';
+
+const emptyChangedLines = async () => ({ newLines: new Map(), oldLines: new Map() });
+const fakeOriginalUri = (file: string) => vscode.Uri.file(file);
 
 function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -29,7 +31,8 @@ suite('CommentBridge.refresh concurrency', () => {
 				events.push('notes');
 				return [];
 			},
-			async () => new Map<string, LineRange[]>(),
+			emptyChangedLines,
+			fakeOriginalUri,
 		);
 		bridge.activate(fakeContext() as never);
 		try {
@@ -57,7 +60,8 @@ suite('CommentBridge.refresh concurrency', () => {
 		const bridge = new CommentBridge(
 			store,
 			async () => [],
-			async () => new Map<string, LineRange[]>(),
+			emptyChangedLines,
+			fakeOriginalUri,
 		);
 		bridge.activate(fakeContext() as never);
 		try {

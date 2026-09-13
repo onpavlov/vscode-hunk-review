@@ -6,6 +6,12 @@ export interface LineRange {
 	end: number;
 }
 
+/** Изменённые диапазоны строк на обеих сторонах диффа: новой (рабочее дерево) и старой (HEAD). */
+export interface ChangedLines {
+	newLines: Map<string, LineRange[]>;
+	oldLines: Map<string, LineRange[]>;
+}
+
 export interface GitRepositoryLike {
 	rootUri: vscode.Uri;
 	diff(cached?: boolean): Thenable<string>;
@@ -48,10 +54,11 @@ export class DiffService {
 		);
 	}
 
-	static parseDiffLines(diffText: string): Map<string, LineRange[]> {
-		const result = new Map<string, LineRange[]>();
+	static parseDiffLines(diffText: string): ChangedLines {
+		const newLines = new Map<string, LineRange[]>();
+		const oldLines = new Map<string, LineRange[]>();
 		let currentFile = '';
-		const hunkRe = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
+		const hunkRe = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 		for (const line of diffText.split('\n')) {
 			const diffLine = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
 			if (diffLine) {
@@ -60,28 +67,36 @@ export class DiffService {
 			}
 			const m = hunkRe.exec(line);
 			if (m) {
-				const start = Number(m[1]);
-				const count = m[2] === undefined ? 1 : Number(m[2]);
-				const ranges = result.get(currentFile) ?? [];
-				ranges.push({ start, end: start + count - 1 });
-				result.set(currentFile, ranges);
+				const oldStart = Number(m[1]);
+				const oldCount = m[2] === undefined ? 1 : Number(m[2]);
+				const newStart = Number(m[3]);
+				const newCount = m[4] === undefined ? 1 : Number(m[4]);
+				const newRanges = newLines.get(currentFile) ?? [];
+				newRanges.push({ start: newStart, end: newStart + newCount - 1 });
+				newLines.set(currentFile, newRanges);
+				const oldRanges = oldLines.get(currentFile) ?? [];
+				oldRanges.push({ start: oldStart, end: oldStart + oldCount - 1 });
+				oldLines.set(currentFile, oldRanges);
 			}
 		}
-		return result;
+		return { newLines, oldLines };
 	}
 
-	async getChangedLines(): Promise<Map<string, LineRange[]>> {
+	async getChangedLines(): Promise<ChangedLines> {
 		const repo = this.getRepo();
 		if (!repo) {
-			return new Map();
+			return { newLines: new Map(), oldLines: new Map() };
 		}
 		const worktree = await repo.diff();
 		const staged = await repo.diff(true);
-		const combined = DiffService.parseDiffLines(`${worktree}\n${staged}`);
-		for (const [file, ranges] of combined) {
-			combined.set(file, mergeRanges(ranges));
+		const { newLines, oldLines } = DiffService.parseDiffLines(`${worktree}\n${staged}`);
+		for (const [file, ranges] of newLines) {
+			newLines.set(file, mergeRanges(ranges));
 		}
-		return combined;
+		for (const [file, ranges] of oldLines) {
+			oldLines.set(file, mergeRanges(ranges));
+		}
+		return { newLines, oldLines };
 	}
 
 	async isWorktreeClean(): Promise<boolean> {
@@ -92,12 +107,17 @@ export class DiffService {
 		return repo.state.workingTreeChanges.length === 0 && repo.state.indexChanges.length === 0;
 	}
 
-	async openDiffForFile(modifiedUri: vscode.Uri): Promise<void> {
+	/** URI дореволюционной (HEAD) версии файла — та же сторона, что открывается слева в diff-редакторе. */
+	getOriginalUri(modifiedUri: vscode.Uri): vscode.Uri {
 		const api = this.gitApi();
 		if (!api) {
 			throw new Error('Git extension is not available');
 		}
-		const originalUri = api.toGitUri(modifiedUri, 'HEAD');
+		return api.toGitUri(modifiedUri, 'HEAD');
+	}
+
+	async openDiffForFile(modifiedUri: vscode.Uri): Promise<void> {
+		const originalUri = this.getOriginalUri(modifiedUri);
 		await vscode.commands.executeCommand(
 			'vscode.diff',
 			originalUri,
