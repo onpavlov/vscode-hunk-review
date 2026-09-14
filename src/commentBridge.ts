@@ -203,42 +203,52 @@ export class CommentBridge {
 		if (!this.controller) {
 			return;
 		}
-		for (const thread of this.threadByKey.values()) {
-			thread.dispose();
-		}
-		this.threadByKey.clear();
 
 		const storeData = await this.store.load();
 		const notes = await this.syncNotes();
 		const descriptors = buildThreadDescriptors(storeData.comments, notes);
+		const seenKeys = new Set<string>();
 
 		for (const d of descriptors) {
+			seenKeys.add(d.threadKey);
 			const uri =
 				d.side === 'old'
 					? this.originalUri(d.file)
 					: vscode.Uri.joinPath(workspaceRoot(), d.file);
-			const thread = this.controller.createCommentThread(
-				uri,
-				new vscode.Range(d.start - 1, 0, d.end - 1, Number.MAX_SAFE_INTEGER),
-				d.comments.map(
-					(c): HunkComment => ({
-						// Markdown, чтобы ответы агента сохраняли форматирование (**жирный**, `код`, списки) —
-						// строкой это превращалось в сырые звёздочки и обратные кавычки.
-						body: new vscode.MarkdownString(c.body),
-						author: { name: c.author, iconPath: this.avatarUri(c.avatar) },
-						label: c.label,
-						timestamp: c.timestamp,
-						// All comments start as plain rows (Preview); editComment switches
-						// one comment into Editing on demand (see extension.ts).
-						mode: vscode.CommentMode.Preview,
-						storeId: c.storeId,
-						contextValue: c.contextValue,
-					}),
-				),
+			const range = new vscode.Range(d.start - 1, 0, d.end - 1, Number.MAX_SAFE_INTEGER);
+			const comments = d.comments.map(
+				(c): HunkComment => ({
+					// Markdown, чтобы ответы агента сохраняли форматирование (**жирный**, `код`, списки) —
+					// строкой это превращалось в сырые звёздочки и обратные кавычки.
+					body: new vscode.MarkdownString(c.body),
+					author: { name: c.author, iconPath: this.avatarUri(c.avatar) },
+					label: c.label,
+					timestamp: c.timestamp,
+					// All comments start as plain rows (Preview); editComment switches
+					// one comment into Editing on demand (see extension.ts).
+					mode: vscode.CommentMode.Preview,
+					storeId: c.storeId,
+					contextValue: c.contextValue,
+				}),
 			);
+
+			const existing = this.threadByKey.get(d.threadKey);
+			if (existing) {
+				// Update the same thread object in place. Disposing and recreating it
+				// (or reassigning collapsibleState) resets whatever expand/collapse
+				// state the user set by hand in the UI, since VS Code only consults
+				// collapsibleState when the thread is first created.
+				existing.range = range;
+				existing.comments = comments.map((c) => ({ ...c, parent: existing }) as HunkComment);
+				continue;
+			}
+
+			const thread = this.controller.createCommentThread(uri, range, comments);
 			thread.canReply = false;
 			// Threads with nothing left to act on start collapsed, so the diff
 			// isn't wall-to-wall boxes for every already-sent or agent comment.
+			// This default only applies once, at creation — see the in-place
+			// update branch above for why existing threads skip it.
 			thread.collapsibleState = d.collapsed
 				? vscode.CommentThreadCollapsibleState.Collapsed
 				: vscode.CommentThreadCollapsibleState.Expanded;
@@ -246,6 +256,13 @@ export class CommentBridge {
 			// their own thread's comments array without a full store-based refresh.
 			thread.comments = thread.comments.map((c) => ({ ...c, parent: thread }) as HunkComment);
 			this.threadByKey.set(d.threadKey, thread);
+		}
+
+		for (const [key, thread] of this.threadByKey) {
+			if (!seenKeys.has(key)) {
+				thread.dispose();
+				this.threadByKey.delete(key);
+			}
 		}
 	}
 
