@@ -17,7 +17,8 @@
       {
         "command": "hunk-review.openDiff",
         "title": "%command.openDiff.title%",
-        "category": "hunk-review"
+        "category": "hunk-review",
+        "icon": "$(git-compare)"
       },
       {
         "command": "hunk-review.sendComments",
@@ -71,6 +72,13 @@
       }
     ],
     "menus": {
+      "scm/title": [
+        {
+          "command": "hunk-review.openDiff",
+          "when": "scmProvider == git",
+          "group": "navigation"
+        }
+      ],
       "comments/commentThread/context": [
         {
           "command": "hunk-review.addComment",

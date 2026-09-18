@@ -55,11 +55,23 @@ export function activate(context: vscode.ExtensionContext): void {
 		statusBar.tooltip = sessionAlive
 			? vscode.l10n.t('hunk session is active (click for menu)')
 			: vscode.l10n.t('hunk session is not running (click for menu)');
+		if (n > 0) {
+			sendStatusBar.text = `$(comment) ${vscode.l10n.t('Send comments ({0})', n)}`;
+			sendStatusBar.tooltip = vscode.l10n.t('Send {0} pending comment(s) to the agent', n);
+			sendStatusBar.show();
+		} else {
+			sendStatusBar.hide();
+		}
 	};
 
 	const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 	statusBar.command = 'hunk-review.menu';
 	statusBar.show();
+
+	// Отдельная видимая только при наличии pending-комментариев кнопка —
+	// самое частое действие не должно прятаться за QuickPick-меню.
+	const sendStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+	sendStatusBar.command = 'hunk-review.sendComments';
 
 	// Сериализуем операции с сессией: reload из вотчера не должен пересекаться
 	// с отправкой комментариев (apply валидирует батч против текущего diff).
@@ -230,6 +242,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(
 		statusBar,
+		sendStatusBar,
 		bridge,
 		sessionManager,
 		sync,

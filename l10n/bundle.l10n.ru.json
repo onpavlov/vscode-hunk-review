@@ -11,6 +11,8 @@
 	"stopped by user": "остановлено пользователем",
 	"Open review": "Открыть ревью",
 	"Send comments to agent ({0})": "Отправить комментарии агенту ({0})",
+	"Send comments ({0})": "Отправить комментарии ({0})",
+	"Send {0} pending comment(s) to the agent": "Отправить {0} ожидающих комментариев агенту",
 	"Connect to session": "Подключиться к сессии",
 	"Stop hunk session": "Остановить hunk сессию",
 	"Enter comment text in the thread field and click the button again.": "Введите текст комментария в поле треда и нажмите кнопку ещё раз.",
