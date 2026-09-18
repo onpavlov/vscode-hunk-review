@@ -12,3 +12,10 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+CLAUDE.md
+.claude/**
+.crush/**
+.superpowers/**
+docs/**
+media/**
+assets/icon.svg

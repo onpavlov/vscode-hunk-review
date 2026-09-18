@@ -8,7 +8,7 @@ where a coding agent can read them.
 - Opens a review of uncommitted changes (working tree + staging) in native
   VS Code diff editors; changed lines are highlighted.
 - Lets you comment on changed lines: click "+" → type text in the thread
-  editor → press the "hunk: Добавить комментарий" button. This works on both
+  editor → press the "hunk: Add Comment" button. This works on both
   sides of the diff editor — added/context lines on the new (right) side and
   deleted lines on the original/HEAD (left) side.
 - Stores comments locally in `.hunk-review/comments.json`
@@ -28,7 +28,7 @@ where a coding agent can read them.
   stops polling, clears the state and shows session liveness in the status bar
   (`hunk • live`).
 - Stops the session when the working tree becomes clean (committed or
-  reverted), or via the "Остановить hunk сессию" command.
+  reverted), or via the "hunk: Stop hunk Session" command.
 
 ## Requirements
 
@@ -53,7 +53,7 @@ Then in VS Code:
    Folder…` → a project with uncommitted changes.
 4. `Cmd+Shift+P` → `Developer: Reload Window` — so the extension activates
    with the folder already open.
-5. `Cmd+Shift+P` → "hunk: Открыть ревью рабочего дерева".
+5. `Cmd+Shift+P` → "hunk: Open Working Tree Review".
 
 Tests: `npm test` (launches a real VS Code instance; the smoke test skips
 itself when no live hunk session is available). Types and lint: `npm run
@@ -62,12 +62,12 @@ check-types`, `npm run lint`. Build: `npm run compile`; production package:
 
 ## Typical review loop
 
-1. "hunk: Открыть ревью рабочего дерева" → the diff opens in VS Code.
-2. "+" on a changed line → text → "hunk: Добавить комментарий" (status bar
+1. "hunk: Open Working Tree Review" → the diff opens in VS Code.
+2. "+" on a changed line → text → "hunk: Add Comment" (status bar
    shows `hunk: N pending`).
-3. "hunk: Отправить комментарии агенту" → a hidden terminal with the hunk
+3. "hunk: Send Comments to Agent" → a hidden terminal with the hunk
    TUI starts in the background, comments are sent as a batch and become
-   `you (sent)`. Use "hunk: Подключиться к сессии" to open the TUI.
+   `you (sent)`. Use "hunk: Connect to Session" to open the TUI.
 4. Agent replies arrive in the threads automatically (~5 s).
 5. Once you commit or revert the changes, the background session stops
    itself.

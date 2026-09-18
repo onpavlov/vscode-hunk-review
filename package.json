@@ -2,7 +2,14 @@
   "name": "hunk-review",
   "displayName": "hunk-review",
   "description": "Code review integrated with hunk.dev",
-  "version": "0.0.1",
+  "version": "0.1.0",
+  "publisher": "onpavlov",
+  "license": "MIT",
+  "icon": "assets/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/onpavlov/vscode-hunk-review.git"
+  },
   "engines": {
     "vscode": "^1.136.0"
   },
