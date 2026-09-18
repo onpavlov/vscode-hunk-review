@@ -94,17 +94,16 @@ export class CommentStore {
 	}
 }
 
+/** Создаёт `<dir>/.gitignore` со звёздочкой, если его ещё нет — сама директория `.hunk-review`
+ *  игнорирует себя целиком, корневой .gitignore проекта не трогаем. */
 export async function ensureGitignore(dir: string): Promise<void> {
 	const gitignore = path.join(dir, '.gitignore');
-	let content = '';
 	try {
-		content = await fs.readFile(gitignore, 'utf8');
+		await fs.access(gitignore);
+		return;
 	} catch {
 		// no .gitignore yet
 	}
-	if (content.split('\n').some((l) => l.trim() === '.hunk-review/')) {
-		return;
-	}
-	const next = content.endsWith('\n') || content === '' ? content : `${content}\n`;
-	await fs.writeFile(gitignore, `${next}.hunk-review/\n`, 'utf8');
+	await fs.mkdir(dir, { recursive: true });
+	await fs.writeFile(gitignore, '*\n', 'utf8');
 }

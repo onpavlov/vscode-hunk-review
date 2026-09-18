@@ -24,10 +24,10 @@ export interface ThreadCommentDescriptor {
 	timestamp: Date;
 	/** undefined = pending (editable by user); true = sent/stale; false = editable hunk note (unused) */
 	readOnly: boolean;
-	/** store id, set only for pending comments owned by the user */
+	/** store id, set for pending/stale comments owned by the user (deletable) */
 	storeId?: string;
-	/** menu gate for edit/delete buttons; set only for pending comments owned by the user */
-	contextValue?: 'pending';
+	/** menu gate: 'pending' shows edit+delete, 'stale' shows delete only; unset (sent) has neither */
+	contextValue?: 'pending' | 'stale';
 }
 
 export interface ThreadDescriptor {
@@ -76,8 +76,8 @@ export function buildThreadDescriptors(
 			body: c.summary,
 			timestamp: new Date(c.createdAt),
 			readOnly: c.status !== 'pending',
-			storeId: c.status === 'pending' ? c.id : undefined,
-			contextValue: c.status === 'pending' ? 'pending' : undefined,
+			storeId: c.status !== 'sent' ? c.id : undefined,
+			contextValue: c.status === 'pending' || c.status === 'stale' ? c.status : undefined,
 		};
 		if (existing) {
 			existing.comments.push(descriptor);
@@ -139,7 +139,7 @@ export function buildThreadDescriptors(
 /** Comment with an attached storeId/parent so edit/delete/save commands can identify and mutate it. */
 export interface HunkComment extends vscode.Comment {
 	storeId?: string;
-	contextValue?: 'pending' | 'editing';
+	contextValue?: 'pending' | 'stale' | 'editing';
 	/** back-reference to the owning thread, filled in right after creation */
 	parent?: vscode.CommentThread;
 }
@@ -239,7 +239,19 @@ export class CommentBridge {
 				// state the user set by hand in the UI, since VS Code only consults
 				// collapsibleState when the thread is first created.
 				existing.range = range;
-				existing.comments = comments.map((c) => ({ ...c, parent: existing }) as HunkComment);
+				// Comments currently open in the native editing textarea keep their exact
+				// object (unsaved input and Editing mode intact) instead of being replaced —
+				// background refreshes (polling, other threads' saves) used to blow away
+				// an in-progress edit out from under the user.
+				const editingByStoreId = new Map(
+					(existing.comments as HunkComment[])
+						.filter((c) => c.contextValue === 'editing')
+						.map((c) => [c.storeId, c] as const),
+				);
+				existing.comments = comments.map((c) => {
+					const editing = c.storeId ? editingByStoreId.get(c.storeId) : undefined;
+					return editing ?? (({ ...c, parent: existing }) as HunkComment);
+				});
 				continue;
 			}
 

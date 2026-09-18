@@ -57,11 +57,11 @@ suite('CommentStore', () => {
 		await assert.rejects(() => store.add('a.ts', { newLine: 1, oldLine: 2 }, 'x'));
 	});
 
-	test('ensureGitignore appends .hunk-review/ once', async () => {
-		const dir = tmpDir();
+	test('ensureGitignore creates a .gitignore with * inside the given directory', async () => {
+		const dir = path.join(tmpDir(), '.hunk-review');
 		await ensureGitignore(dir);
 		await ensureGitignore(dir);
 		const content = fs.readFileSync(path.join(dir, '.gitignore'), 'utf8');
-		assert.strictEqual(content.split('\n').filter((l) => l.trim() === '.hunk-review/').length, 1);
+		assert.strictEqual(content, '*\n');
 	});
 });

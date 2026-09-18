@@ -114,7 +114,7 @@ suite('buildThreadDescriptors', () => {
 		assert.strictEqual(desc.find((d) => d.comments[0].storeId === 'n')?.side, 'new');
 	});
 
-	test('only pending comments get the edit/delete menu gate', () => {
+	test('pending gets edit+delete, stale gets delete only, sent gets neither', () => {
 		const desc = buildThreadDescriptors(
 			[
 				stored({ id: 'p', target: { newLine: 1 }, status: 'pending' }),
@@ -124,7 +124,10 @@ suite('buildThreadDescriptors', () => {
 			[],
 		);
 		assert.strictEqual(desc[0].comments[0].contextValue, 'pending');
+		assert.strictEqual(desc[0].comments[0].storeId, 'p');
 		assert.strictEqual(desc[1].comments[0].contextValue, undefined);
-		assert.strictEqual(desc[2].comments[0].contextValue, undefined);
+		assert.strictEqual(desc[1].comments[0].storeId, undefined);
+		assert.strictEqual(desc[2].comments[0].contextValue, 'stale');
+		assert.strictEqual(desc[2].comments[0].storeId, 'x');
 	});
 });

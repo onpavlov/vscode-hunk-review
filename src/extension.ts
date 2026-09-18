@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { createHunkCli } from './hunkCli.js';
+import { createHunkCli, HunkCommandError } from './hunkCli.js';
 import { CommentStore, ensureGitignore } from './commentStore.js';
 import { DiffService } from './diffService.js';
 import { CommentBridge } from './commentBridge.js';
@@ -24,7 +24,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	}
 
 	const cli = createHunkCli();
-	const store = new CommentStore(path.join(root, '.hunk-review'));
+	const hunkDir = path.join(root, '.hunk-review');
+	const store = new CommentStore(hunkDir);
 	const diff = new DiffService();
 	const sync = new HunkSync(cli, root, {
 		isSessionAlive: () => cli.findSession(root).then((s) => s !== undefined),
@@ -127,8 +128,14 @@ export function activate(context: vscode.ExtensionContext): void {
 				await bridge.refresh();
 			} catch (err) {
 				await markStaleOnApplyFailure(err);
+				// HunkCommandError.message is just "<cmd> exited with code N" — the actual
+				// reason lives in stderr, which was previously dropped on the floor here.
+				const detail =
+					err instanceof HunkCommandError && err.stderr.trim()
+						? `${err.message}: ${err.stderr.trim()}`
+						: String(err);
 				void vscode.window.showErrorMessage(
-					vscode.l10n.t('Failed to send comments: {0}', String(err)),
+					vscode.l10n.t('Failed to send comments: {0}', detail),
 				);
 			}
 		});
@@ -194,7 +201,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			void vscode.window.showInformationMessage(vscode.l10n.t('No uncommitted changes'));
 			return;
 		}
-		await ensureGitignore(root);
+		await ensureGitignore(hunkDir);
 		for (const [file] of changed.newLines) {
 			const uri = vscode.Uri.joinPath(repo.rootUri, file);
 			await diff.openDiffForFile(uri);
@@ -202,6 +209,23 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 		await bridge.refresh();
 		await refreshDecorations();
+	};
+
+	// Flips one comment back out of the native editing textarea locally. Needed because
+	// CommentBridge.refresh() now preserves whatever is still flagged 'editing' across
+	// background refreshes (see commentBridge.ts) — without this, Save/Cancel would leave
+	// the comment stuck in Editing mode forever, and its edit/delete menu (gated on
+	// contextValue === 'pending') would never come back.
+	const exitEditingMode = (comment: HunkComment) => {
+		const thread = comment?.parent;
+		if (!comment?.storeId || !thread) {
+			return;
+		}
+		thread.comments = thread.comments.map((c) =>
+			c === comment
+				? ({ ...c, mode: vscode.CommentMode.Preview, contextValue: 'pending' } as HunkComment)
+				: c,
+		);
 	};
 
 	context.subscriptions.push(
@@ -303,11 +327,13 @@ export function activate(context: vscode.ExtensionContext): void {
 				return;
 			}
 			await store.update(id, { summary });
+			exitEditingMode(comment);
 			await bridge.refresh();
 		}),
-		vscode.commands.registerCommand('hunk-review.cancelEditComment', async () => {
-			// Store wasn't touched — a full refresh rebuilds threads from it,
-			// discarding the in-progress edit and restoring the original text.
+		vscode.commands.registerCommand('hunk-review.cancelEditComment', async (comment: HunkComment) => {
+			// Store wasn't touched — exiting Editing mode locally and refreshing
+			// rebuilds this comment from the store, discarding the in-progress edit.
+			exitEditingMode(comment);
 			await bridge.refresh();
 		}),
 		vscode.commands.registerCommand('hunk-review.deleteComment', async (comment: HunkComment) => {

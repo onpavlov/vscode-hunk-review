@@ -87,7 +87,7 @@
         {
           "command": "hunk-review.deleteComment",
           "group": "group@2",
-          "when": "commentController == hunk-review.comments && comment == pending"
+          "when": "commentController == hunk-review.comments && (comment == pending || comment == stale)"
         }
       ],
       "comments/comment/context": [
