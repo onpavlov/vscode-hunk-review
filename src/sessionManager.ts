@@ -13,10 +13,10 @@ export const vscodeTerminalFactory: TerminalFactory = (cwd, onDispose) => {
 	const terminal = vscode.window.createTerminal({
 		name: 'hunk review session',
 		cwd,
-		// Прячем терминал, чтобы запуск hunk diff не крал фокус у редактора.
+		// Hide the terminal so launching hunk diff doesn't steal focus from the editor.
 		hideFromUser: true,
-		// Запускаем TUI как процесс терминала; без этого открывается пустой shell
-		// и hunk никогда не стартует.
+		// Run the TUI as the terminal's process; without this an empty shell opens
+		// and hunk never starts.
 		shellPath: 'hunk',
 		shellArgs: ['diff'],
 	});
@@ -65,7 +65,7 @@ export class SessionManager implements vscode.Disposable {
 		});
 		const registered = await this.waitForRegistration();
 		if (!registered) {
-			// Терминал мог закрыться сам (крэш TUI) и обнулить this.terminal через onDispose.
+			// The terminal may have closed on its own (TUI crash) and cleared this.terminal via onDispose.
 			this.terminal?.dispose();
 			this.terminal = undefined;
 			throw new Error(vscode.l10n.t('hunk session did not register within 10 seconds'));
@@ -86,7 +86,7 @@ export class SessionManager implements vscode.Disposable {
 		return undefined;
 	}
 
-	/** Сбрасывает состояние сессии без уведомлений (сессия потеряна снаружи). */
+	/** Resets session state without notifying anyone (session was lost externally). */
 	clearSession(): void {
 		this.terminal?.dispose();
 		this.terminal = undefined;

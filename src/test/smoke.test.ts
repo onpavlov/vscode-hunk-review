@@ -19,7 +19,7 @@ suite('smoke with real hunk CLI', function () {
 		const cli = createHunkCli();
 		let session;
 		try {
-			// Проверяем apply на живой сессии: пропускаем, если нет tty-возможности запустить TUI.
+			// Check apply on a live session: skip if there's no tty to launch the TUI.
 			session = await cli.findSession(root);
 			if (!session) {
 				this.skip();
@@ -32,11 +32,11 @@ suite('smoke with real hunk CLI', function () {
 			assert.ok(notes.some((n) => n.body === 'smoke probe'));
 		} finally {
 			if (session) {
-				// Останавливаем сессию: убиваем процесс TUI по pid из session list.
+				// Stop the session: kill the TUI process by pid from session list.
 				try {
 					process.kill(session.pid ?? -1);
 				} catch {
-					// сессия уже завершена
+					// session already finished
 				}
 			}
 			fs.rmSync(root, { recursive: true, force: true });

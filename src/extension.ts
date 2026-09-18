@@ -68,13 +68,13 @@ export function activate(context: vscode.ExtensionContext): void {
 	statusBar.command = 'hunk-review.menu';
 	statusBar.show();
 
-	// Отдельная видимая только при наличии pending-комментариев кнопка —
-	// самое частое действие не должно прятаться за QuickPick-меню.
+	// Separate button shown only when there are pending comments —
+	// the most frequent action shouldn't be hidden behind the QuickPick menu.
 	const sendStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
 	sendStatusBar.command = 'hunk-review.sendComments';
 
-	// Сериализуем операции с сессией: reload из вотчера не должен пересекаться
-	// с отправкой комментариев (apply валидирует батч против текущего diff).
+	// Serialize session operations: a watcher-triggered reload must not overlap
+	// with sending comments (apply validates the batch against the current diff).
 	let sessionOps: Promise<unknown> = Promise.resolve();
 	const serializeSessionOp = <T>(op: () => Promise<T>): Promise<T> => {
 		const run = sessionOps.then(op, op);
@@ -136,7 +136,7 @@ export function activate(context: vscode.ExtensionContext): void {
 					),
 				);
 				await sync.pollOnce();
-				sync.start(5_000); // пока сессия жива — опрашиваем комментарии агента
+				sync.start(5_000); // while the session is alive — poll for agent comments
 				await bridge.refresh();
 			} catch (err) {
 				await markStaleOnApplyFailure(err);
@@ -172,15 +172,15 @@ export function activate(context: vscode.ExtensionContext): void {
 				oldLines: new Map(),
 			});
 		} catch {
-			// диагностика stale недоступна — не критично
+			// stale diagnostics unavailable — not critical
 		}
 		void err;
 	};
 
-	// Живое обновление: сохранения и git-операции ведут к перерасчёту диффа,
-	// декораций, разметке stale и (при живой сессии) reload содержимого hunk.
-	// Пустой дифф пропускаем: reload без изменений отключает сессию от демона
-	// (проверено на 0.21.x), чистое дерево обрабатывает автостоп.
+	// Live update: saves and git operations lead to recomputing the diff,
+	// decorations, marking comments stale, and (if the session is live) reloading hunk's content.
+	// Skip an empty diff: reloading with no changes disconnects the session from the daemon
+	// (observed on 0.21.x); a clean tree is handled by auto-stop.
 	const onWorktreeChanged = async () => {
 		const changed = await diff.getChangedLines();
 		await refreshDecorations(changed);
@@ -191,7 +191,7 @@ export function activate(context: vscode.ExtensionContext): void {
 					await cli.reload(root);
 					await sync.pollOnce();
 				} catch {
-					// reload не критичен — поллинг и следующая отправка останутся рабочими
+					// reload failure isn't critical — polling and the next send will still work
 				}
 			}
 		}
@@ -217,7 +217,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		for (const [file] of changed.newLines) {
 			const uri = vscode.Uri.joinPath(repo.rootUri, file);
 			await diff.openDiffForFile(uri);
-			break; // открываем первый изменённый файл; остальные — по клику из списка
+			break; // open the first changed file; others are opened by clicking the list
 		}
 		await bridge.refresh();
 		await refreshDecorations();
@@ -309,8 +309,8 @@ export function activate(context: vscode.ExtensionContext): void {
 			// git-scheme = original (HEAD) side of a diff editor — the target is a deleted line.
 			const target = thread.uri.scheme === 'git' ? { oldLine: line } : { newLine: line };
 			await store.add(file, target, summary);
-			// Закрываем черновой тред («Start discussion»), иначе он остаётся
-			// открытым рядом с тредом, пересобранным из стора.
+			// Close the draft thread ("Start discussion"), otherwise it stays
+			// open next to the thread rebuilt from the store.
 			thread.dispose();
 			await hasPending();
 			await bridge.refresh();
@@ -361,8 +361,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		}),
 	);
 
-	// Триггеры живого обновления: сохранения файлов и git-операции
-	// (commit/stash/checkout) идут в один дебаунс-обработчик.
+	// Live-update triggers: file saves and git operations
+	// (commit/stash/checkout) feed one debounced handler.
 	context.subscriptions.push(
 		vscode.workspace.onDidSaveTextDocument(() => worktreeWatcher.trigger()),
 	);
@@ -370,10 +370,10 @@ export function activate(context: vscode.ExtensionContext): void {
 	if (repo?.state.onDidChange) {
 		context.subscriptions.push(repo.state.onDidChange(() => worktreeWatcher.trigger()));
 	}
-	// Автостоп при чистом рабочем дереве — периодической проверкой.
+	// Auto-stop on a clean working tree — via a periodic check.
 	const autoStopTimer = setInterval(() => {
 		void sessionManager.maybeAutoStop().then(() => {
-			// Сессия остановлена — не оставляем поллинг собирать ошибки.
+			// Session stopped — don't leave polling running to accumulate errors.
 			if (!sessionManager.currentSession()) {
 				sync.stop();
 			}
@@ -389,8 +389,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	void hasPending();
 	void bridge.activate(context);
-	// Сессия могла быть запущена раньше (или перезапущена сессия терминала):
-	// при активации ищем живую сессию и включаем поллинг комментариев.
+	// The session may have been started earlier (or the terminal session restarted):
+	// on activation, look for a live session and enable comment polling.
 	void sessionManager.findSession().then((s) => {
 		if (s) {
 			sync.start(5_000);
@@ -399,7 +399,7 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-	// SessionManager.dispose() вызывается через context.subscriptions.
+	// SessionManager.dispose() is called via context.subscriptions.
 }
 
 function registerStubCommands(context: vscode.ExtensionContext): void {

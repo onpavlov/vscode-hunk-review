@@ -39,7 +39,7 @@ suite('SessionManager', () => {
 			return { dispose: () => undefined } as never;
 		};
 		const cli = fakeCli([]);
-		// После первого запуска терминала сессия «регистрируется».
+		// After the terminal's first launch the session "registers".
 		cli.findSession = async (r: string) =>
 			terminalsStarted > 0 ? { sessionId: 's9', repoRoot: r } : undefined;
 		const sm = new SessionManager(

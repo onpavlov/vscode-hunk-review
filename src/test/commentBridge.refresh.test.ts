@@ -36,14 +36,14 @@ suite('CommentBridge.refresh concurrency', () => {
 		);
 		bridge.activate(fakeContext() as never);
 		try {
-			// Паттерн из sendComments: onDidChange запускает refresh в фоне,
-			// а вызывающий код параллельно делает await refresh().
+			// Pattern from sendComments: onDidChange kicks off refresh in the background,
+			// while the calling code concurrently awaits refresh().
 			const first = bridge.refresh();
 			const second = bridge.refresh();
 			await Promise.all([first, second]);
 
-			// При гонке оба load() стартуют до того, как первый завершится:
-			// load:start, load:start — это и порождает дубли тредов.
+			// In a race both load() calls start before the first one finishes:
+			// load:start, load:start — this is what produces duplicate threads.
 			assert.ok(
 				events.indexOf('load:end') < events.indexOf('load:start', 1),
 				`refresh calls interleaved: ${events.join(',')}`,

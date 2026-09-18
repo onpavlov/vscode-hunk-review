@@ -3,9 +3,9 @@ import type { HunkCli } from './hunkCli.js';
 import type { HunkNote } from './types.js';
 
 export interface HunkSyncOptions {
-	/** Проверка живости сессии; вызывается только при ошибке полла. */
+	/** Session liveness check; called only when a poll fails. */
 	isSessionAlive?: () => Promise<boolean>;
-	/** Сколько подряд неудачных поллов считать потерей сессии (по умолчанию 2). */
+	/** How many consecutive failed polls count as session loss (default 2). */
 	missedPollsBeforeLoss?: number;
 }
 

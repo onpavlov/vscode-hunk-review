@@ -1,7 +1,7 @@
 import type { ChangedLines, LineRange } from './diffService.js';
 import type { HunkReviewResult, StoredComment } from './types.js';
 
-/** Приводит hunk-диапазоны из `session review` к карте изменённых строк. */
+/** Converts hunk ranges from `session review` into a map of changed lines. */
 export function hunksToChangedLines(review: HunkReviewResult): Map<string, LineRange[]> {
 	const changed = new Map<string, LineRange[]>();
 	for (const f of review.files) {
@@ -16,10 +16,10 @@ export function hunksToChangedLines(review: HunkReviewResult): Map<string, LineR
 }
 
 /**
- * Ищет pending-комментарии, чей якорь (файл, строка) больше не попадает
- * ни в один изменённый диапазон диффа. Возвращает их store id.
- * Комментарии к удалённой строке (oldLine) сверяются со старой стороной диффа,
- * остальные — с новой.
+ * Finds pending comments whose anchor (file, line) no longer falls
+ * inside any changed range of the diff. Returns their store ids.
+ * Comments on a deleted line (oldLine) are checked against the old side of the diff,
+ * others against the new side.
  */
 export function findStaleCommentIds(
 	comments: StoredComment[],

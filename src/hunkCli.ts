@@ -109,7 +109,7 @@ export class HunkCli {
 			sessions = await this.listSessions();
 		} catch (err) {
 			if (err instanceof HunkCommandError) {
-				// Демон недоступен — считаем сессий ноль (см. spec: обработка ошибок).
+				// Daemon unreachable — treat session count as zero (see spec: error handling).
 				return undefined;
 			}
 			throw err;
@@ -136,8 +136,8 @@ export class HunkCli {
 		return raw.map((c) => this.normalizeNote(c));
 	}
 
-	// Формы полей `comment list --json` гуляют между версиями/источниками:
-	// noteId|commentId, newRange|line, body|summary, source — опционален.
+	// Field shapes of `comment list --json` drift between versions/sources:
+	// noteId|commentId, newRange|line, body|summary, source — optional.
 	private normalizeNote(c: Record<string, unknown>): HunkNote {
 		const line = (c['line'] ?? 1) as number;
 		return {
@@ -177,8 +177,8 @@ export class HunkCli {
 	}
 
 	async reload(repoRoot: string): Promise<void> {
-		// reload требует хвостовую подкоманду (`-- diff`): без неё CLI валидирует
-		// аргументы и падает, содержимое сессии не меняется.
+		// reload requires a trailing subcommand (`-- diff`): without it the CLI validates
+		// arguments and fails, and the session content doesn't change.
 		await this.run(['session', 'reload', '--repo', repoRoot, '--', 'diff']);
 	}
 }

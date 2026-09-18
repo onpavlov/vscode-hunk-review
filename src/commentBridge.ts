@@ -47,10 +47,10 @@ export function buildThreadDescriptors(
 	notes: HunkNote[],
 ): ThreadDescriptor[] {
 	const threads = new Map<string, ThreadDescriptor>();
-	// Сторона включена в ключ: строка N в старой и в новой версии файла — разные якоря.
+	// Side is included in the key: line N in the old and new versions of the file are different anchors.
 	const keyOf = (file: string, side: 'old' | 'new', line: number) => `${file}:${side}:${line}`;
-	// Эхо: наши же комментарии возвращаются из comment list как notes.
-	// Фильтруем по sessionCommentId и по (файл, строка, текст) на случай дрейфа id.
+	// Echo: our own comments come back from comment list as notes.
+	// Filter by sessionCommentId and by (file, line, text) in case the id drifts.
 	const ownIds = new Set(
 		stored.map((c) => c.sessionCommentId).filter((id): id is string => !!id),
 	);
@@ -95,12 +95,12 @@ export function buildThreadDescriptors(
 		}
 	}
 
-	// Агентские заметки всегда приходят с newRange — привязаны к новой стороне диффа.
+	// Agent notes always come with newRange — anchored to the new side of the diff.
 	const notePos = new Map(
 		notes.map((n) => [n.noteId, { file: n.filePath, line: n.newRange?.[0] ?? 1 }]),
 	);
 	for (const n of notes) {
-		// Ответы агента (parentId) клеятся к треду родительской заметки.
+		// Agent replies (parentId) attach to the parent note's thread.
 		const anchor = n.parentId ? (notePos.get(n.parentId) ?? null) : null;
 		const file = anchor?.file ?? n.filePath;
 		const line = anchor?.line ?? n.newRange?.[0] ?? 1;
@@ -148,15 +148,15 @@ export class CommentBridge {
 	private controller?: vscode.CommentController;
 	private extensionUri?: vscode.Uri;
 	private threadByKey = new Map<string, vscode.CommentThread>();
-	// Очередь рефрешей: конкурентные вызовы (sendComments + onDidChange)
-	// без сериализации создают дубли тредов — осиротевшие копии остаются в UI.
+	// Refresh queue: concurrent calls (sendComments + onDidChange)
+	// without serialization create duplicate threads — orphaned copies linger in the UI.
 	private refreshChain: Promise<void> = Promise.resolve();
 
 	constructor(
 		private readonly store: CommentStore,
 		private readonly syncNotes: () => Promise<HunkNote[]>,
 		private readonly getChangedLines: () => Promise<ChangedLines>,
-		/** URI дореволюционной (HEAD) версии файла — где живут удалённые строки. */
+		/** URI of the original (HEAD) version of the file — where deleted lines live. */
 		private readonly originalUri: (file: string) => vscode.Uri,
 	) {}
 
@@ -218,8 +218,8 @@ export class CommentBridge {
 			const range = new vscode.Range(d.start - 1, 0, d.end - 1, Number.MAX_SAFE_INTEGER);
 			const comments = d.comments.map(
 				(c): HunkComment => ({
-					// Markdown, чтобы ответы агента сохраняли форматирование (**жирный**, `код`, списки) —
-					// строкой это превращалось в сырые звёздочки и обратные кавычки.
+					// Markdown so agent replies keep formatting (**bold**, `code`, lists) —
+					// plain strings turned those into raw asterisks and backticks.
 					body: new vscode.MarkdownString(c.body),
 					author: { name: c.author, iconPath: this.avatarUri(c.avatar) },
 					label: c.label,

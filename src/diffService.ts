@@ -6,7 +6,7 @@ export interface LineRange {
 	end: number;
 }
 
-/** Изменённые диапазоны строк на обеих сторонах диффа: новой (рабочее дерево) и старой (HEAD). */
+/** Changed line ranges on both sides of the diff: the new one (working tree) and the old one (HEAD). */
 export interface ChangedLines {
 	newLines: Map<string, LineRange[]>;
 	oldLines: Map<string, LineRange[]>;
@@ -18,7 +18,7 @@ export interface GitRepositoryLike {
 	state: {
 		workingTreeChanges: Array<{ uri: vscode.Uri }>;
 		indexChanges: Array<{ uri: vscode.Uri }>;
-		/** Реальный API git-расширения событие несёт; в тестовых фейках может отсутствовать. */
+		/** The real git extension API event carries this; may be absent in test fakes. */
 		onDidChange?: vscode.Event<unknown>;
 	};
 }
@@ -107,7 +107,7 @@ export class DiffService {
 		return repo.state.workingTreeChanges.length === 0 && repo.state.indexChanges.length === 0;
 	}
 
-	/** URI дореволюционной (HEAD) версии файла — та же сторона, что открывается слева в diff-редакторе. */
+	/** URI of the pre-revision (HEAD) version of the file — the same side that opens on the left in the diff editor. */
 	getOriginalUri(modifiedUri: vscode.Uri): vscode.Uri {
 		const api = this.gitApi();
 		if (!api) {

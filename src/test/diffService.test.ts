@@ -41,12 +41,12 @@ suite('DiffService.parseDiffLines', () => {
 
 	test('parses single-line hunk headers without count', () => {
 		const { newLines } = DiffService.parseDiffLines('@@ -5 +5,0 @@');
-		assert.deepStrictEqual(newLines.get(''), [{ start: 5, end: 4 }]); // +5,0 → пустой диапазон
+		assert.deepStrictEqual(newLines.get(''), [{ start: 5, end: 4 }]); // +5,0 → empty range
 	});
 
 	test('a pure deletion yields an old-side range but no new-side one', () => {
 		const { newLines, oldLines } = DiffService.parseDiffLines('@@ -5,2 +4,0 @@');
 		assert.deepStrictEqual(oldLines.get(''), [{ start: 5, end: 6 }]);
-		assert.deepStrictEqual(newLines.get(''), [{ start: 4, end: 3 }]); // +4,0 → пустой диапазон
+		assert.deepStrictEqual(newLines.get(''), [{ start: 4, end: 3 }]); // +4,0 → empty range
 	});
 });
