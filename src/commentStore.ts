@@ -2,6 +2,8 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import type {
+	ArchivedComment,
+	CommentArchiveData,
 	CommentStoreData,
 	CommentTarget,
 	StoredComment,
@@ -11,9 +13,11 @@ const EMPTY: CommentStoreData = { version: 1, comments: [] };
 
 export class CommentStore {
 	private readonly file: string;
+	private readonly archiveFile: string;
 
 	constructor(private readonly dir: string) {
 		this.file = path.join(dir, 'comments.json');
+		this.archiveFile = path.join(dir, 'archive.json');
 	}
 
 	async load(): Promise<CommentStoreData> {
@@ -82,6 +86,35 @@ export class CommentStore {
 		const data = await this.load();
 		data.comments = data.comments.filter((c) => c.id !== id);
 		await this.write(data);
+	}
+
+	async loadArchive(): Promise<CommentArchiveData> {
+		try {
+			const data = JSON.parse(await fs.readFile(this.archiveFile, 'utf8')) as CommentArchiveData;
+			return { version: 1, comments: data.comments ?? [] };
+		} catch {
+			// Missing or unreadable archive — start empty (the next archive() rewrites it).
+			return { version: 1, comments: [] };
+		}
+	}
+
+	/** Moves the given comments from the active store to `archive.json`. Returns how many were moved. */
+	async archive(ids: string[], commit?: string): Promise<number> {
+		const wanted = new Set(ids);
+		const data = await this.load();
+		const moved = data.comments.filter((c) => wanted.has(c.id));
+		if (moved.length === 0) {
+			return 0;
+		}
+		const archivedAt = new Date().toISOString();
+		const archive = await this.loadArchive();
+		archive.comments.push(...moved.map((c): ArchivedComment => ({ ...c, archivedAt, commit })));
+		// Write the archive first: a crash in between duplicates a comment rather than losing it.
+		await fs.mkdir(path.dirname(this.archiveFile), { recursive: true });
+		await fs.writeFile(this.archiveFile, JSON.stringify(archive, null, 2), 'utf8');
+		data.comments = data.comments.filter((c) => !wanted.has(c.id));
+		await this.write(data);
+		return moved.length;
 	}
 
 	async pending(): Promise<StoredComment[]> {

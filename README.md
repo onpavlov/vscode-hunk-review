@@ -8,7 +8,7 @@ where a coding agent can read them.
 - Opens a review of uncommitted changes (working tree + staging) in native
   VS Code diff editors; changed lines are highlighted.
 - Lets you comment on changed lines: click "+" → type text in the thread
-  editor → press the "hunk: Add Comment" button. This works on both
+  editor → press the "Add Comment" button. This works on both
   sides of the diff editor — added/context lines on the new (right) side and
   deleted lines on the original/HEAD (left) side.
 - Stores comments locally in `.hunk-review/comments.json`
@@ -27,8 +27,11 @@ where a coding agent can read them.
 - Detects a session that died outside VS Code (or when the diff became empty),
   stops polling, clears the state and shows session liveness in the status bar
   (`hunk • live`).
+- After you commit, comments whose lines went into the commit are moved to
+  `.hunk-review/archive.json` (with the commit sha); comments on lines that
+  are still changed stay active.
 - Stops the session when the working tree becomes clean (committed or
-  reverted), or via the "hunk: Stop hunk Session" command.
+  reverted), or via the "Stop hunk Session" command.
 
 ## Requirements
 
@@ -53,7 +56,7 @@ Then in VS Code:
    Folder…` → a project with uncommitted changes.
 4. `Cmd+Shift+P` → `Developer: Reload Window` — so the extension activates
    with the folder already open.
-5. `Cmd+Shift+P` → "hunk: Open Working Tree Review".
+5. `Cmd+Shift+P` → "Open Working Tree Review".
 
 Tests: `npm test` (launches a real VS Code instance; the smoke test skips
 itself when no live hunk session is available). Types and lint: `npm run
@@ -62,12 +65,12 @@ check-types`, `npm run lint`. Build: `npm run compile`; production package:
 
 ## Typical review loop
 
-1. "hunk: Open Working Tree Review" → the diff opens in VS Code.
-2. "+" on a changed line → text → "hunk: Add Comment" (status bar
+1. Click "Start review" in the status bar (or the compare button in the editor toolbar or the Source Control title, or run "Open Working Tree Review") → the diff opens in VS Code. If the hunk CLI is not installed, a warning with install instructions is shown.
+2. "+" on a changed line → text → "Add Comment" (status bar
    shows `hunk: N pending`).
-3. "hunk: Send Comments to Agent" → a hidden terminal with the hunk
+3. "Send Comments to Agent" → a hidden terminal with the hunk
    TUI starts in the background, comments are sent as a batch and become
-   `you (sent)`. Use "hunk: Connect to Session" to open the TUI.
+   `you (sent)`. Use "Connect to Session" to open the TUI.
 4. Agent replies arrive in the threads automatically (~5 s).
 5. Once you commit or revert the changes, the background session stops
    itself.

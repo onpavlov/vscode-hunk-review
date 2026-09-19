@@ -167,7 +167,7 @@ export class CommentBridge {
 			'Hunk Review',
 		);
 		this.controller.options = {
-			prompt: vscode.l10n.t('Type the text and run "hunk: Add Comment"'),
+			prompt: vscode.l10n.t('Type the text and run "Add Comment"'),
 			placeHolder: vscode.l10n.t('The comment text will be sent to the hunk session'),
 		};
 

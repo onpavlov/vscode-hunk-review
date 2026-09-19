@@ -15,6 +15,18 @@ export interface StoredComment {
 	createdAt: string;
 }
 
+/** A comment moved out of the active store after the commit that included its lines. */
+export interface ArchivedComment extends StoredComment {
+	archivedAt: string;
+	/** HEAD commit sha at the time of archiving (the commit that swallowed the change). */
+	commit?: string;
+}
+
+export interface CommentArchiveData {
+	version: 1;
+	comments: ArchivedComment[];
+}
+
 export interface CommentStoreData {
 	version: 1;
 	comments: StoredComment[];

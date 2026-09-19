@@ -24,12 +24,18 @@
 	"You": "Вы",
 	"AI Agent": "ИИ-агент",
 	"note": "заметка",
-	"Type the text and run \"hunk: Add Comment\"": "Введите текст и нажмите «hunk: Добавить комментарий»",
+	"Type the text and run \"Add Comment\"": "Введите текст и нажмите «Добавить комментарий»",
 	"The comment text will be sent to the hunk session": "Текст комментария уйдёт в hunk-сессию",
 	"Working tree is clean — nothing to review": "Рабочее дерево чистое — ревьюить нечего",
 	"hunk session did not register within 10 seconds": "hunk-сессия не зарегистрировалась за 10 секунд",
 	"hunk session stopped: {0}": "hunk-сессия остановлена: {0}",
 	"changes committed or discarded": "изменения закоммичены или отменены",
 	"hunk session is running outside VS Code — terminal unavailable": "hunk-сессия запущена вне VS Code — терминал недоступен",
-	"hunk session is not running": "hunk-сессия не запущена"
+	"hunk session is not running": "hunk-сессия не запущена",
+	"Start review": "Начать ревью",
+	"Open the working tree review": "Открыть ревью рабочего дерева",
+	"Copy install command": "Скопировать команду установки",
+	"Open install docs": "Открыть инструкцию по установке",
+	"The hunk CLI was not found in PATH. Comments are saved locally, but sending them to an agent needs hunk. Install it with \"{0}\" (or via Homebrew / the install script), then reload the window.": "hunk CLI не найден в PATH. Комментарии сохраняются локально, но для отправки агенту нужен hunk. Установите его командой «{0}» (или через Homebrew / установочный скрипт) и перезагрузите окно.",
+	"Archived {0} comment(s) after the commit.": "После коммита перенесено в архив комментариев: {0}."
 }

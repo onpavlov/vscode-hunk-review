@@ -25,18 +25,25 @@ export function findStaleCommentIds(
 	comments: StoredComment[],
 	changedLines: ChangedLines,
 ): string[] {
-	const stale: string[] = [];
-	for (const c of comments) {
-		if (c.status !== 'pending') {
-			continue;
-		}
-		const isOld = c.target.oldLine !== undefined;
-		const line = isOld ? c.target.oldLine! : (c.target.newLine ?? 1);
-		const ranges = (isOld ? changedLines.oldLines : changedLines.newLines).get(c.filePath) ?? [];
-		const inDiff = ranges.some((r) => line >= r.start && line <= r.end);
-		if (!inDiff) {
-			stale.push(c.id);
-		}
-	}
-	return stale;
+	return comments
+		.filter((c) => c.status === 'pending' && !isInDiff(c, changedLines))
+		.map((c) => c.id);
+}
+
+/**
+ * Finds comments of any status whose anchor no longer falls inside the diff —
+ * after a commit these are the ones whose lines went into the commit. Returns their store ids.
+ */
+export function findOutOfDiffCommentIds(
+	comments: StoredComment[],
+	changedLines: ChangedLines,
+): string[] {
+	return comments.filter((c) => !isInDiff(c, changedLines)).map((c) => c.id);
+}
+
+function isInDiff(c: StoredComment, changedLines: ChangedLines): boolean {
+	const isOld = c.target.oldLine !== undefined;
+	const line = isOld ? c.target.oldLine! : (c.target.newLine ?? 1);
+	const ranges = (isOld ? changedLines.oldLines : changedLines.newLines).get(c.filePath) ?? [];
+	return ranges.some((r) => line >= r.start && line <= r.end);
 }

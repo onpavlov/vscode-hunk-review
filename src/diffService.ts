@@ -16,6 +16,8 @@ export interface GitRepositoryLike {
 	rootUri: vscode.Uri;
 	diff(cached?: boolean): Thenable<string>;
 	state: {
+		/** Current branch and commit; absent in test fakes. */
+		HEAD?: { name?: string; commit?: string };
 		workingTreeChanges: Array<{ uri: vscode.Uri }>;
 		indexChanges: Array<{ uri: vscode.Uri }>;
 		/** The real git extension API event carries this; may be absent in test fakes. */
@@ -52,6 +54,11 @@ export class DiffService {
 			api.repositories.find((r) => r.rootUri.fsPath === workspaceFolder.uri.fsPath) ??
 			api.repositories[0]
 		);
+	}
+
+	getHead(): { name?: string; commit?: string } | undefined {
+		const head = this.getRepo()?.state.HEAD;
+		return head ? { name: head.name, commit: head.commit } : undefined;
 	}
 
 	static parseDiffLines(diffText: string): ChangedLines {

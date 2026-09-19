@@ -1,12 +1,12 @@
 {
-	"command.openDiff.title": "hunk: Open Working Tree Review",
-	"command.sendComments.title": "hunk: Send Comments to Agent",
-	"command.stopSession.title": "hunk: Stop hunk Session",
-	"command.connectToSession.title": "hunk: Connect to Session",
-	"command.menu.title": "hunk: Review Menu",
-	"command.addComment.title": "hunk: Add Comment",
-	"command.editComment.title": "hunk: Edit Comment",
-	"command.deleteComment.title": "hunk: Delete Comment",
-	"command.saveComment.title": "hunk: Save Comment",
-	"command.cancelEditComment.title": "hunk: Cancel Editing"
+	"command.openDiff.title": "Open Working Tree Review",
+	"command.sendComments.title": "Send Comments to Agent",
+	"command.stopSession.title": "Stop hunk Session",
+	"command.connectToSession.title": "Connect to Session",
+	"command.menu.title": "Review Menu",
+	"command.addComment.title": "Add Comment",
+	"command.editComment.title": "Edit Comment",
+	"command.deleteComment.title": "Delete Comment",
+	"command.saveComment.title": "Save Comment",
+	"command.cancelEditComment.title": "Cancel Editing"
 }

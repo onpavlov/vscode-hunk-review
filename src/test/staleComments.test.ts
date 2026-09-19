@@ -1,5 +1,5 @@
 import * as assert from 'node:assert';
-import { findStaleCommentIds, hunksToChangedLines } from '../staleComments.js';
+import { findOutOfDiffCommentIds, findStaleCommentIds, hunksToChangedLines } from '../staleComments.js';
 import type { HunkReviewResult } from '../types.js';
 import type { StoredComment } from '../types.js';
 import type { LineRange } from '../diffService.js';
@@ -82,6 +82,34 @@ suite('findStaleCommentIds', () => {
 			findStaleCommentIds([deletedLineComment('c2', 'a.ts', 8)], changedWithOld),
 			[],
 		);
+	});
+
+	suite('findOutOfDiffCommentIds', () => {
+		const changed = {
+			newLines: new Map<string, LineRange[]>([['a.ts', [{ start: 2, end: 4 }]]]),
+			oldLines: new Map<string, LineRange[]>(),
+		};
+
+		test('returns comments of every status that left the diff, keeps the ones still inside', () => {
+			const ids = findOutOfDiffCommentIds(
+				[
+					comment('in', 'a.ts', 3, 'sent'),
+					comment('sent-out', 'a.ts', 10, 'sent'),
+					comment('pending-out', 'b.ts', 1),
+					comment('stale-out', 'a.ts', 9, 'stale'),
+				],
+				changed,
+			);
+			assert.deepStrictEqual(ids, ['sent-out', 'pending-out', 'stale-out']);
+		});
+
+		test('everything is out of an empty diff', () => {
+			const empty = { newLines: new Map<string, LineRange[]>(), oldLines: new Map<string, LineRange[]>() };
+			assert.deepStrictEqual(
+				findOutOfDiffCommentIds([comment('c1', 'a.ts', 3), deletedLineComment('c2', 'a.ts', 8)], empty),
+				['c1', 'c2'],
+			);
+		});
 	});
 
 	suite('hunksToChangedLines', () => {

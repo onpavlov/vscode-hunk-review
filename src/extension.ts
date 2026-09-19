@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { createHunkCli, HunkCommandError } from './hunkCli.js';
+import { createHunkCli, HunkCommandError, HunkNotInstalledError } from './hunkCli.js';
 import { CommentStore, ensureGitignore } from './commentStore.js';
 import { DiffService } from './diffService.js';
 import { CommentBridge } from './commentBridge.js';
@@ -11,7 +11,7 @@ import { HunkSync } from './hunkSync.js';
 import { createDecorations } from './decorations.js';
 import { createDebouncer } from './debounce.js';
 import { formatStatusText } from './statusText.js';
-import { findStaleCommentIds, hunksToChangedLines } from './staleComments.js';
+import { findOutOfDiffCommentIds, findStaleCommentIds, hunksToChangedLines } from './staleComments.js';
 import type { ChangedLines } from './diffService.js';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -55,6 +55,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		statusBar.tooltip = sessionAlive
 			? vscode.l10n.t('hunk session is active (click for menu)')
 			: vscode.l10n.t('hunk session is not running (click for menu)');
+		if (sessionAlive) {
+			startStatusBar.hide();
+		} else {
+			startStatusBar.show();
+		}
 		if (n > 0) {
 			sendStatusBar.text = `$(comment) ${vscode.l10n.t('Send comments ({0})', n)}`;
 			sendStatusBar.tooltip = vscode.l10n.t('Send {0} pending comment(s) to the agent', n);
@@ -67,6 +72,12 @@ export function activate(context: vscode.ExtensionContext): void {
 	const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 	statusBar.command = 'hunk-review.menu';
 	statusBar.show();
+
+	// One-click entry point: shown until a hunk session is live.
+	const startStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
+	startStatusBar.text = `$(git-compare) ${vscode.l10n.t('Start review')}`;
+	startStatusBar.tooltip = vscode.l10n.t('Open the working tree review');
+	startStatusBar.command = 'hunk-review.openDiff';
 
 	// Separate button shown only when there are pending comments —
 	// the most frequent action shouldn't be hidden behind the QuickPick menu.
@@ -83,6 +94,40 @@ export function activate(context: vscode.ExtensionContext): void {
 			() => undefined,
 		);
 		return run;
+	};
+
+	const INSTALL_COMMAND = 'npm install --global hunkdiff';
+	const INSTALL_DOCS_URL = 'https://www.hunk.dev/docs/start/install/';
+
+	// Recommend how to install the hunk CLI. Shown after starting a review (the diff
+	// itself works without hunk) and when sending comments fails because it is missing.
+	const warnHunkNotInstalled = async () => {
+		const copy = vscode.l10n.t('Copy install command');
+		const docs = vscode.l10n.t('Open install docs');
+		const pick = await vscode.window.showWarningMessage(
+			vscode.l10n.t(
+				'The hunk CLI was not found in PATH. Comments are saved locally, but sending them to an agent needs hunk. Install it with "{0}" (or via Homebrew / the install script), then reload the window.',
+				INSTALL_COMMAND,
+			),
+			copy,
+			docs,
+		);
+		if (pick === copy) {
+			await vscode.env.clipboard.writeText(INSTALL_COMMAND);
+		} else if (pick === docs) {
+			await vscode.env.openExternal(vscode.Uri.parse(INSTALL_DOCS_URL));
+		}
+	};
+
+	const checkHunkInstalled = async () => {
+		try {
+			await cli.listSessions();
+		} catch (err) {
+			if (err instanceof HunkNotInstalledError) {
+				void warnHunkNotInstalled();
+			}
+			// other errors (e.g. daemon not running) mean hunk itself is present
+		}
 	};
 
 	const sendComments = async () => {
@@ -139,6 +184,10 @@ export function activate(context: vscode.ExtensionContext): void {
 				sync.start(5_000); // while the session is alive — poll for agent comments
 				await bridge.refresh();
 			} catch (err) {
+				if (err instanceof HunkNotInstalledError) {
+					void warnHunkNotInstalled();
+					return;
+				}
 				await markStaleOnApplyFailure(err);
 				// HunkCommandError.message is just "<cmd> exited with code N" — the actual
 				// reason lives in stderr, which was previously dropped on the floor here.
@@ -152,6 +201,25 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		});
 		await hasPending();
+	};
+
+	// A commit on the same branch changes HEAD's sha: comments whose lines went into it
+	// are moved to the archive. A branch switch also changes the sha, so it is excluded by name.
+	let lastHead = diff.getHead();
+	const archiveAfterCommit = async (changed: ChangedLines) => {
+		const prev = lastHead;
+		const head = diff.getHead();
+		lastHead = head;
+		if (!prev?.commit || !head?.commit || prev.commit === head.commit || prev.name !== head.name) {
+			return;
+		}
+		const { comments } = await store.load();
+		const archived = await store.archive(findOutOfDiffCommentIds(comments, changed), head.commit);
+		if (archived > 0) {
+			void vscode.window.showInformationMessage(
+				vscode.l10n.t('Archived {0} comment(s) after the commit.', archived),
+			);
+		}
 	};
 
 	const markStaleComments = async (changed: ChangedLines) => {
@@ -184,6 +252,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	const onWorktreeChanged = async () => {
 		const changed = await diff.getChangedLines();
 		await refreshDecorations(changed);
+		await archiveAfterCommit(changed);
 		if (changed.newLines.size > 0) {
 			await markStaleComments(changed);
 			if (sessionManager.currentSession()) {
@@ -221,6 +290,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 		await bridge.refresh();
 		await refreshDecorations();
+		await checkHunkInstalled();
 	};
 
 	// Flips one comment back out of the native editing textarea locally. Needed because
@@ -243,6 +313,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		statusBar,
 		sendStatusBar,
+		startStatusBar,
 		bridge,
 		sessionManager,
 		sync,
