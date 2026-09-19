@@ -2,6 +2,11 @@
 
 All notable changes to the "hunk-review" extension will be documented in this file.
 
+## [0.2.1]
+
+- Document how to set up the hunk-review skill for the coding agent.
+- Add the repository link to the dev build instructions and a disclaimer that the extension is not affiliated with hunk or Modem.
+
 ## [0.2.0]
 
 - Add a one-click "Start review" button to the editor toolbar and the status bar; the status bar now appears right after startup.

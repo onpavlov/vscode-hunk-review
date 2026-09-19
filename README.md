@@ -39,10 +39,31 @@ where a coding agent can read them.
   [install docs](https://www.hunk.dev/docs/start/install/).
 - VS Code 1.136+.
 
+## Agent setup: the hunk-review skill
+
+For the coding agent to read and answer your comments, it needs the
+`hunk-review` skill bundled with hunk. Print its path with:
+
+```bash
+hunk skill path            # .../skills/hunk-review/SKILL.md
+```
+
+Then link the skill directory into your agent's skills folder so it stays in
+sync across hunk upgrades. For example, for Claude Code:
+
+```bash
+mkdir -p ~/.claude/skills
+ln -s "$(dirname "$(hunk skill path)")" ~/.claude/skills/hunk-review
+```
+
+For other agents, load or symlink the printed `SKILL.md` the way that agent
+expects skills to be installed. See the
+[hunk docs](https://www.hunk.dev/docs/) for details.
+
 ## Running the dev build
 
 ```bash
-git clone <repo-url> hunk-review
+git clone https://github.com/onpavlov/vscode-hunk-review.git hunk-review
 cd hunk-review
 npm install
 ```
@@ -88,7 +109,22 @@ None so far.
 
 ## Release Notes
 
+### 0.2.1
+
+Documentation: hunk-review skill setup, dev build clone link, disclaimer.
+
+### 0.2.0
+
+One-click "Start review" button in the editor toolbar and status bar, warning
+when the hunk CLI is not found, comments that went into a commit are archived
+to `.hunk-review/archive.json`.
+
 ### 0.1.0
 
 First working release: working-tree review, comments into a hunk session,
 agent reply sync, automatic session stop.
+
+## Disclaimer
+
+hunk-review is an independent community extension. It is not affiliated with
+or endorsed by Modem or the [hunk](https://hunk.dev) project.
