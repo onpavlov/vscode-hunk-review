@@ -2,6 +2,10 @@
 
 All notable changes to the "hunk-review" extension will be documented in this file.
 
+## [0.3.0]
+
+- Show your GitHub avatar next to your own review comments. Configure it with `hunk-review.githubUsername`, or leave it empty to auto-detect from a GitHub noreply commit email in your git config.
+
 ## [0.2.1]
 
 - Document how to set up the hunk-review skill for the coding agent.

@@ -2,6 +2,7 @@ import * as assert from 'node:assert';
 import * as vscode from 'vscode';
 import { CommentBridge } from '../commentBridge.js';
 import type { CommentStore } from '../commentStore.js';
+import type { StoredComment } from '../types.js';
 
 const emptyChangedLines = async () => ({ newLines: new Map(), oldLines: new Map() });
 const fakeOriginalUri = (file: string) => vscode.Uri.file(file);
@@ -10,8 +11,8 @@ function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function fakeContext(): { subscriptions: Array<{ dispose(): void }> } {
-	return { subscriptions: [] };
+function fakeContext(): { subscriptions: Array<{ dispose(): void }>; extensionUri: vscode.Uri } {
+	return { subscriptions: [], extensionUri: vscode.Uri.file('/ext') };
 }
 
 suite('CommentBridge.refresh concurrency', () => {
@@ -68,6 +69,57 @@ suite('CommentBridge.refresh concurrency', () => {
 			await bridge.refresh();
 			await bridge.refresh();
 			assert.ok(true);
+		} finally {
+			bridge.dispose();
+		}
+	});
+});
+
+suite('CommentBridge avatar resolution', () => {
+	// 'old' side: doRefresh resolves its uri via originalUri(), not workspaceRoot(),
+	// so this works without a workspace folder open (as in the test host here).
+	function storedComment(): StoredComment {
+		return {
+			id: 'c1',
+			filePath: 'src/a.ts',
+			target: { oldLine: 1 },
+			summary: 'hi',
+			status: 'pending',
+			createdAt: '2026-09-10T00:00:00Z',
+		};
+	}
+
+	test('uses the resolved GitHub avatar for the user role', async () => {
+		const store = { load: async () => ({ version: 1 as const, comments: [storedComment()] }) } as unknown as CommentStore;
+		const bridge = new CommentBridge(
+			store,
+			async () => [],
+			emptyChangedLines,
+			fakeOriginalUri,
+			() => vscode.Uri.parse('https://github.com/octocat.png'),
+		);
+		bridge.activate(fakeContext() as never);
+		try {
+			await bridge.refresh();
+			const thread = (bridge as unknown as { threadByKey: Map<string, vscode.CommentThread> }).threadByKey.get(
+				'src/a.ts:old:1',
+			);
+			assert.strictEqual(thread?.comments[0].author.iconPath?.toString(), 'https://github.com/octocat.png');
+		} finally {
+			bridge.dispose();
+		}
+	});
+
+	test('falls back to the local icon when no GitHub avatar is resolved', async () => {
+		const store = { load: async () => ({ version: 1 as const, comments: [storedComment()] }) } as unknown as CommentStore;
+		const bridge = new CommentBridge(store, async () => [], emptyChangedLines, fakeOriginalUri, () => undefined);
+		bridge.activate(fakeContext() as never);
+		try {
+			await bridge.refresh();
+			const thread = (bridge as unknown as { threadByKey: Map<string, vscode.CommentThread> }).threadByKey.get(
+				'src/a.ts:old:1',
+			);
+			assert.ok(thread?.comments[0].author.iconPath?.toString().endsWith('avatar-user.svg'));
 		} finally {
 			bridge.dispose();
 		}
