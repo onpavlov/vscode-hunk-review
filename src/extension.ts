@@ -13,6 +13,7 @@ import { createDebouncer } from './debounce.js';
 import { formatStatusText } from './statusText.js';
 import { findOutOfDiffCommentIds, findStaleCommentIds, hunksToChangedLines } from './staleComments.js';
 import type { ChangedLines } from './diffService.js';
+import { createUserAvatarResolver } from './userAvatar.js';
 
 export function activate(context: vscode.ExtensionContext): void {
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -30,12 +31,14 @@ export function activate(context: vscode.ExtensionContext): void {
 	const sync = new HunkSync(cli, root, {
 		isSessionAlive: () => cli.findSession(root).then((s) => s !== undefined),
 	});
+	const userAvatar = createUserAvatarResolver(() => diff.getUserEmail());
 	const bridge = new CommentBridge(
 		store,
 		() =>
 			sessionManager.currentSession() ? Promise.resolve(sync.getNotes()) : Promise.resolve([]),
 		() => diff.getChangedLines(),
 		(file) => diff.getOriginalUri(vscode.Uri.joinPath(vscode.Uri.file(root), file)),
+		() => userAvatar.uri(),
 	);
 	const sessionManager = new SessionManager(cli, root, undefined, undefined, () =>
 		diff.isWorktreeClean(),
@@ -326,6 +329,11 @@ export function activate(context: vscode.ExtensionContext): void {
 			void hasPending();
 			void vscode.window.showInformationMessage(vscode.l10n.t('hunk session ended'));
 		}),
+		vscode.workspace.onDidChangeConfiguration((e) => {
+			if (e.affectsConfiguration('hunk-review.githubUsername')) {
+				void userAvatar.refresh().then(() => bridge.refresh());
+			}
+		}),
 		worktreeWatcher,
 		vscode.commands.registerCommand('hunk-review.openDiff', openDiff),
 		vscode.commands.registerCommand('hunk-review.sendComments', sendComments),
@@ -460,6 +468,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	void hasPending();
 	void bridge.activate(context);
+	// Resolves in the background — comments render with the local fallback icon
+	// until the GitHub avatar is known, then pick it up on the next refresh.
+	void userAvatar.refresh().then(() => bridge.refresh());
 	// The session may have been started earlier (or the terminal session restarted):
 	// on activation, look for a live session and enable comment polling.
 	void sessionManager.findSession().then((s) => {

@@ -2,8 +2,9 @@
 
 All notable changes to the "hunk-review" extension will be documented in this file.
 
-## [0.2.2]
+## [0.3.0]
 
+- Show your GitHub avatar next to your own review comments. Configure it with `hunk-review.githubUsername`, or leave it empty to auto-detect from a GitHub noreply commit email in your git config.
 - Fix comments on untracked files being wrongly marked stale: `git diff` never lists untracked files, so their changed-line range was always empty; now the whole file is treated as changed when `git diff` has nothing for it.
 
 ## [0.2.1]

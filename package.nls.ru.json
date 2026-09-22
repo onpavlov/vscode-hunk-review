@@ -8,5 +8,6 @@
 	"command.editComment.title": "Изменить комментарий",
 	"command.deleteComment.title": "Удалить комментарий",
 	"command.saveComment.title": "Сохранить комментарий",
-	"command.cancelEditComment.title": "Отменить редактирование"
+	"command.cancelEditComment.title": "Отменить редактирование",
+	"configuration.githubUsername.description": "Имя пользователя GitHub для вашей аватарки в комментариях ревью (`https://github.com/<username>.png`). Оставьте пустым, чтобы определить автоматически по noreply-адресу коммитов GitHub из вашей git-конфигурации, если он задан."
 }

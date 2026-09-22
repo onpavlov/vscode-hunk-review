@@ -158,6 +158,8 @@ export class CommentBridge {
 		private readonly getChangedLines: () => Promise<ChangedLines>,
 		/** URI of the original (HEAD) version of the file — where deleted lines live. */
 		private readonly originalUri: (file: string) => vscode.Uri,
+		/** Cached GitHub avatar for the 'user' role; undefined falls back to the local icon. */
+		private readonly resolveUserAvatarUri: () => vscode.Uri | undefined = () => undefined,
 	) {}
 
 	activate(context: vscode.ExtensionContext): void {
@@ -283,6 +285,12 @@ export class CommentBridge {
 	}
 
 	private avatarUri(avatar: 'user' | 'agent'): vscode.Uri | undefined {
+		if (avatar === 'user') {
+			const githubAvatar = this.resolveUserAvatarUri();
+			if (githubAvatar) {
+				return githubAvatar;
+			}
+		}
 		if (!this.extensionUri) {
 			return undefined;
 		}

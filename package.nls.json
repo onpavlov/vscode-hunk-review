@@ -8,5 +8,6 @@
 	"command.editComment.title": "Edit Comment",
 	"command.deleteComment.title": "Delete Comment",
 	"command.saveComment.title": "Save Comment",
-	"command.cancelEditComment.title": "Cancel Editing"
+	"command.cancelEditComment.title": "Cancel Editing",
+	"configuration.githubUsername.description": "GitHub username used for your avatar on review comments (`https://github.com/<username>.png`). Leave empty to auto-detect from a GitHub noreply commit email in your git config, if set."
 }

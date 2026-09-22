@@ -15,6 +15,7 @@ export interface ChangedLines {
 export interface GitRepositoryLike {
 	rootUri: vscode.Uri;
 	diff(cached?: boolean): Thenable<string>;
+	getConfig(key: string): Thenable<string>;
 	state: {
 		/** Current branch and commit; absent in test fakes. */
 		HEAD?: { name?: string; commit?: string };
@@ -59,6 +60,20 @@ export class DiffService {
 	getHead(): { name?: string; commit?: string } | undefined {
 		const head = this.getRepo()?.state.HEAD;
 		return head ? { name: head.name, commit: head.commit } : undefined;
+	}
+
+	/** `user.email` from the repo's git config, or undefined if unset/unreadable. */
+	async getUserEmail(): Promise<string | undefined> {
+		const repo = this.getRepo();
+		if (!repo) {
+			return undefined;
+		}
+		try {
+			const email = await repo.getConfig('user.email');
+			return email || undefined;
+		} catch {
+			return undefined;
+		}
 	}
 
 	static parseDiffLines(diffText: string): ChangedLines {

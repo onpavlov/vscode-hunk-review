@@ -98,7 +98,9 @@ check-types`, `npm run lint`. Build: `npm run compile`; production package:
 
 ## Extension Settings
 
-None so far.
+- `hunk-review.githubUsername` — GitHub username used for your avatar on
+  review comments (`https://github.com/<username>.png`). Leave empty to
+  auto-detect from a GitHub noreply commit email in your git config, if set.
 
 ## Known Issues
 
