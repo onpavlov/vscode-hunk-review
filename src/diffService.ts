@@ -97,6 +97,10 @@ export class DiffService {
 		const worktree = await repo.diff();
 		const staged = await repo.diff(true);
 		const { newLines, oldLines } = DiffService.parseDiffLines(`${worktree}\n${staged}`);
+		// `git diff` never lists untracked files, so comments anchored there would
+		// have no changed-line range and go stale immediately; treat the whole
+		// file as changed for anything git status flags but git diff is silent on.
+		await this.addUntrackedFiles(repo, newLines);
 		for (const [file, ranges] of newLines) {
 			newLines.set(file, mergeRanges(ranges));
 		}
@@ -104,6 +108,25 @@ export class DiffService {
 			oldLines.set(file, mergeRanges(ranges));
 		}
 		return { newLines, oldLines };
+	}
+
+	private async addUntrackedFiles(
+		repo: GitRepositoryLike,
+		newLines: Map<string, LineRange[]>,
+	): Promise<void> {
+		for (const { uri } of repo.state.workingTreeChanges) {
+			const file = path.relative(repo.rootUri.fsPath, uri.fsPath).split(path.sep).join('/');
+			if (newLines.has(file)) {
+				continue;
+			}
+			try {
+				const bytes = await vscode.workspace.fs.readFile(uri);
+				const lineCount = Buffer.from(bytes).toString('utf8').split('\n').length;
+				newLines.set(file, [{ start: 1, end: lineCount }]);
+			} catch {
+				// file vanished since the status snapshot (renamed/deleted mid-poll) — skip it
+			}
+		}
 	}
 
 	async isWorktreeClean(): Promise<boolean> {

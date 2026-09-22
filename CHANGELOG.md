@@ -2,6 +2,10 @@
 
 All notable changes to the "hunk-review" extension will be documented in this file.
 
+## [0.2.2]
+
+- Fix comments on untracked files being wrongly marked stale: `git diff` never lists untracked files, so their changed-line range was always empty; now the whole file is treated as changed when `git diff` has nothing for it.
+
 ## [0.2.1]
 
 - Document how to set up the hunk-review skill for the coding agent.

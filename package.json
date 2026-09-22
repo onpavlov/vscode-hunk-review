@@ -2,7 +2,7 @@
   "name": "hunk-review",
   "displayName": "hunk-review",
   "description": "Comment on uncommitted diffs in native VS Code diff editors and send the comments to a live hunk session for a coding agent to read and reply.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "pavlovon",
   "license": "MIT",
   "icon": "assets/icon.png",
