@@ -109,22 +109,7 @@ check-types`, `npm run lint`. Build: `npm run compile`; production package:
 - Comments on lines that no longer exist in the diff are marked `stale`
   on the next send.
 
-## Release Notes
-
-### 0.2.1
-
-Documentation: hunk-review skill setup, dev build clone link, disclaimer.
-
-### 0.2.0
-
-One-click "Start review" button in the editor toolbar and status bar, warning
-when the hunk CLI is not found, comments that went into a commit are archived
-to `.hunk-review/archive.json`.
-
-### 0.1.0
-
-First working release: working-tree review, comments into a hunk session,
-agent reply sync, automatic session stop.
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## Disclaimer
 
