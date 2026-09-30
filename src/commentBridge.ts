@@ -174,7 +174,9 @@ export class CommentBridge {
 		};
 
 		// Provide commenting ranges only on lines that were actually changed.
-		// Falls back to the whole file if the diff map has no entry for it.
+		// A file with no entry in the diff map gets none: hunk only knows files in the
+		// diff, so a comment there could never be sent. New files (staged or untracked)
+		// are in the map as whole-file ranges, so they stay commentable.
 		// The diff editor's original (HEAD) document — `git:`-scheme — carries
 		// the deleted lines, so it needs the old-side ranges, not the new-side ones.
 		this.controller.commentingRangeProvider = {
@@ -182,12 +184,7 @@ export class CommentBridge {
 				const changedLines = await this.getChangedLines();
 				const rel = relPath(document.uri);
 				const isOriginalSide = document.uri.scheme === 'git';
-				const ranges = (isOriginalSide ? changedLines.oldLines : changedLines.newLines).get(rel);
-				if (!ranges || ranges.length === 0) {
-					// Fallback: allow the whole file.
-					const last = document.lineCount - 1;
-					return [new vscode.Range(0, 0, last, Number.MAX_SAFE_INTEGER)];
-				}
+				const ranges = (isOriginalSide ? changedLines.oldLines : changedLines.newLines).get(rel) ?? [];
 				return ranges.map((r) => new vscode.Range(r.start - 1, 0, r.end - 1, Number.MAX_SAFE_INTEGER));
 			},
 		};

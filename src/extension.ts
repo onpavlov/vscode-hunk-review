@@ -11,7 +11,12 @@ import { HunkSync } from './hunkSync.js';
 import { createDecorations } from './decorations.js';
 import { createDebouncer } from './debounce.js';
 import { formatStatusText } from './statusText.js';
-import { findOutOfDiffCommentIds, findStaleCommentIds, hunksToChangedLines } from './staleComments.js';
+import {
+	findOutOfDiffCommentIds,
+	findStaleCommentIds,
+	hunksToChangedLines,
+	isLineInDiff,
+} from './staleComments.js';
 import type { ChangedLines } from './diffService.js';
 import { createUserAvatarResolver } from './userAvatar.js';
 
@@ -387,6 +392,15 @@ export function activate(context: vscode.ExtensionContext): void {
 			const line = ((thread.range?.start.line) ?? 0) + 1;
 			// git-scheme = original (HEAD) side of a diff editor — the target is a deleted line.
 			const target = thread.uri.scheme === 'git' ? { oldLine: line } : { newLine: line };
+			// The commenting ranges may be outdated by now (a save/revert between opening
+			// the draft and submitting it): a line outside the diff could never be sent to hunk.
+			if (!isLineInDiff(file, target, await diff.getChangedLines())) {
+				void vscode.window.showWarningMessage(
+					vscode.l10n.t('Comments can only be added to changed lines.'),
+				);
+				thread.dispose();
+				return;
+			}
 			await store.add(file, target, summary);
 			// Close the draft thread ("Start discussion"), otherwise it stays
 			// open next to the thread rebuilt from the store.

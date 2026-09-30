@@ -21,6 +21,11 @@ export interface GitRepositoryLike {
 		HEAD?: { name?: string; commit?: string };
 		workingTreeChanges: Array<{ uri: vscode.Uri }>;
 		indexChanges: Array<{ uri: vscode.Uri }>;
+		/**
+		 * Untracked files when `git.untrackedChanges` is "separate" (with the default "mixed"
+		 * they are in workingTreeChanges). Missing from older git API versions and test fakes.
+		 */
+		untrackedChanges?: Array<{ uri: vscode.Uri }>;
 		/** The real git extension API event carries this; may be absent in test fakes. */
 		onDidChange?: vscode.Event<unknown>;
 	};
@@ -129,7 +134,7 @@ export class DiffService {
 		repo: GitRepositoryLike,
 		newLines: Map<string, LineRange[]>,
 	): Promise<void> {
-		for (const { uri } of repo.state.workingTreeChanges) {
+		for (const { uri } of [...repo.state.workingTreeChanges, ...(repo.state.untrackedChanges ?? [])]) {
 			const file = path.relative(repo.rootUri.fsPath, uri.fsPath).split(path.sep).join('/');
 			if (newLines.has(file)) {
 				continue;
@@ -149,7 +154,11 @@ export class DiffService {
 		if (!repo) {
 			return true;
 		}
-		return repo.state.workingTreeChanges.length === 0 && repo.state.indexChanges.length === 0;
+		return (
+			repo.state.workingTreeChanges.length === 0 &&
+			repo.state.indexChanges.length === 0 &&
+			(repo.state.untrackedChanges?.length ?? 0) === 0
+		);
 	}
 
 	/** URI of the pre-revision (HEAD) version of the file — the same side that opens on the left in the diff editor. */

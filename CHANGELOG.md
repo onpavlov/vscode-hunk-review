@@ -2,6 +2,11 @@
 
 All notable changes to the "hunk-review" extension will be documented in this file.
 
+## [0.3.1]
+
+- Only changed lines can be commented: files without changes no longer offer a commenting range, since hunk only knows files in the diff and such comments could never be sent. New files (staged or untracked) stay commentable as a whole.
+- Treat untracked files as changed when `git.untrackedChanges` is set to "separate", so they stay commentable and don't make the worktree look clean.
+
 ## [0.3.0]
 
 - Show your GitHub avatar next to your own review comments. Configure it with `hunk-review.githubUsername`, or leave it empty to auto-detect from a GitHub noreply commit email in your git config.

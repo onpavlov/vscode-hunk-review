@@ -1,5 +1,10 @@
 import * as assert from 'node:assert';
-import { findOutOfDiffCommentIds, findStaleCommentIds, hunksToChangedLines } from '../staleComments.js';
+import {
+	findOutOfDiffCommentIds,
+	findStaleCommentIds,
+	hunksToChangedLines,
+	isLineInDiff,
+} from '../staleComments.js';
 import type { HunkReviewResult } from '../types.js';
 import type { StoredComment } from '../types.js';
 import type { LineRange } from '../diffService.js';
@@ -109,6 +114,27 @@ suite('findStaleCommentIds', () => {
 				findOutOfDiffCommentIds([comment('c1', 'a.ts', 3), deletedLineComment('c2', 'a.ts', 8)], empty),
 				['c1', 'c2'],
 			);
+		});
+	});
+
+	suite('isLineInDiff', () => {
+		const changed = {
+			newLines: new Map<string, LineRange[]>([['a.ts', [{ start: 2, end: 4 }]]]),
+			oldLines: new Map<string, LineRange[]>([['a.ts', [{ start: 8, end: 9 }]]]),
+		};
+
+		test('new-side line inside / outside a changed range', () => {
+			assert.strictEqual(isLineInDiff('a.ts', { newLine: 2 }, changed), true);
+			assert.strictEqual(isLineInDiff('a.ts', { newLine: 5 }, changed), false);
+		});
+
+		test('file without changes has no commentable lines', () => {
+			assert.strictEqual(isLineInDiff('clean.ts', { newLine: 1 }, changed), false);
+		});
+
+		test('old-side line is checked against the old-side ranges', () => {
+			assert.strictEqual(isLineInDiff('a.ts', { oldLine: 8 }, changed), true);
+			assert.strictEqual(isLineInDiff('a.ts', { oldLine: 3 }, changed), false);
 		});
 	});
 

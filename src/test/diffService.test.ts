@@ -1,4 +1,7 @@
 import * as assert from 'node:assert';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { DiffService } from '../diffService.js';
 import type { GitApiLike, GitRepositoryLike } from '../diffService.js';
@@ -59,6 +62,51 @@ suite('DiffService.parseDiffLines', () => {
 		const { newLines, oldLines } = DiffService.parseDiffLines('@@ -5,2 +4,0 @@');
 		assert.deepStrictEqual(oldLines.get(''), [{ start: 5, end: 6 }]);
 		assert.deepStrictEqual(newLines.get(''), [{ start: 4, end: 3 }]); // +4,0 → empty range
+	});
+});
+
+suite('DiffService.getChangedLines (new files)', () => {
+	let dir: string;
+	setup(() => {
+		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hunk-review-diff-'));
+	});
+	teardown(() => {
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+
+	function service(repo: Partial<GitRepositoryLike>): DiffService {
+		const full: GitRepositoryLike = {
+			rootUri: vscode.Uri.file(dir),
+			diff: async () => '',
+			getConfig: async () => '',
+			state: { workingTreeChanges: [], indexChanges: [] },
+			...repo,
+		};
+		return new DiffService(() => ({ repositories: [full], toGitUri: (u) => u }));
+	}
+
+	test('a staged new file is changed as a whole', async () => {
+		const staged = [
+			'diff --git a/new.ts b/new.ts',
+			'new file mode 100644',
+			'--- /dev/null',
+			'+++ b/new.ts',
+			'@@ -0,0 +1,3 @@',
+		].join('\n');
+		const svc = service({ diff: async (cached) => (cached ? staged : '') });
+		const { newLines } = await svc.getChangedLines();
+		assert.deepStrictEqual(newLines.get('new.ts'), [{ start: 1, end: 3 }]);
+	});
+
+	test('an untracked file listed separately (git.untrackedChanges: separate) is changed as a whole', async () => {
+		fs.writeFileSync(path.join(dir, 'u.ts'), 'a\nb\n');
+		const uri = vscode.Uri.file(path.join(dir, 'u.ts'));
+		const svc = service({
+			state: { workingTreeChanges: [], indexChanges: [], untrackedChanges: [{ uri }] },
+		});
+		const { newLines } = await svc.getChangedLines();
+		assert.deepStrictEqual(newLines.get('u.ts'), [{ start: 1, end: 3 }]);
+		assert.strictEqual(await svc.isWorktreeClean(), false);
 	});
 });
 

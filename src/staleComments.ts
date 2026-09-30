@@ -41,9 +41,21 @@ export function findOutOfDiffCommentIds(
 	return comments.filter((c) => !isInDiff(c, changedLines)).map((c) => c.id);
 }
 
-function isInDiff(c: StoredComment, changedLines: ChangedLines): boolean {
-	const isOld = c.target.oldLine !== undefined;
-	const line = isOld ? c.target.oldLine! : (c.target.newLine ?? 1);
-	const ranges = (isOld ? changedLines.oldLines : changedLines.newLines).get(c.filePath) ?? [];
+/**
+ * Whether a comment anchor (file + new-side or old-side line) falls inside a changed range.
+ * A deleted line (oldLine) is checked against the old side of the diff, others against the new side.
+ */
+export function isLineInDiff(
+	filePath: string,
+	target: StoredComment['target'],
+	changedLines: ChangedLines,
+): boolean {
+	const isOld = target.oldLine !== undefined;
+	const line = isOld ? target.oldLine! : (target.newLine ?? 1);
+	const ranges = (isOld ? changedLines.oldLines : changedLines.newLines).get(filePath) ?? [];
 	return ranges.some((r) => line >= r.start && line <= r.end);
+}
+
+function isInDiff(c: StoredComment, changedLines: ChangedLines): boolean {
+	return isLineInDiff(c.filePath, c.target, changedLines);
 }
