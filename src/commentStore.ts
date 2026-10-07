@@ -45,7 +45,9 @@ export class CommentStore {
 	}
 
 	private async write(data: CommentStoreData): Promise<void> {
-		await fs.mkdir(path.dirname(this.file), { recursive: true });
+		// Any write may be the one that creates the directory (e.g. a comment added
+		// before a review was opened) — never let it show up as untracked in git.
+		await ensureGitignore(this.dir);
 		await fs.writeFile(this.file, JSON.stringify(data, null, 2), 'utf8');
 	}
 
@@ -110,7 +112,7 @@ export class CommentStore {
 		const archive = await this.loadArchive();
 		archive.comments.push(...moved.map((c): ArchivedComment => ({ ...c, archivedAt, commit })));
 		// Write the archive first: a crash in between duplicates a comment rather than losing it.
-		await fs.mkdir(path.dirname(this.archiveFile), { recursive: true });
+		await ensureGitignore(this.dir);
 		await fs.writeFile(this.archiveFile, JSON.stringify(archive, null, 2), 'utf8');
 		data.comments = data.comments.filter((c) => !wanted.has(c.id));
 		await this.write(data);

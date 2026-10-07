@@ -98,4 +98,10 @@ suite('CommentStore', () => {
 		const content = fs.readFileSync(path.join(dir, '.gitignore'), 'utf8');
 		assert.strictEqual(content, '*\n');
 	});
+
+	test('add creates .gitignore in a fresh store directory', async () => {
+		const dir = path.join(tmpDir(), '.hunk-review');
+		await new CommentStore(dir).add('a.ts', { newLine: 1 }, 'x');
+		assert.strictEqual(fs.readFileSync(path.join(dir, '.gitignore'), 'utf8'), '*\n');
+	});
 });

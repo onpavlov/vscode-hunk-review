@@ -211,6 +211,35 @@ export function activate(context: vscode.ExtensionContext): void {
 		await hasPending();
 	};
 
+	// Adding a comment starts the hunk session if it isn't running yet. Runs in the
+	// background (the comment is already stored); concurrent adds share one attempt.
+	let sessionStart: Promise<void> | undefined;
+	const startSessionInBackground = () => {
+		if (sessionManager.currentSession() || sessionStart) {
+			return;
+		}
+		sessionStart = serializeSessionOp(async () => {
+			try {
+				await sessionManager.ensureSession();
+				sync.start(5_000);
+			} catch (err) {
+				if (err instanceof HunkNotInstalledError) {
+					void warnHunkNotInstalled();
+					return;
+				}
+				void vscode.window.showWarningMessage(
+					vscode.l10n.t(
+						'Failed to start hunk session: {0}',
+						err instanceof Error ? err.message : String(err),
+					),
+				);
+			}
+		}).finally(() => {
+			sessionStart = undefined;
+			void hasPending();
+		});
+	};
+
 	// A commit on the same branch changes HEAD's sha: comments whose lines went into it
 	// are moved to the archive. A branch switch also changes the sha, so it is excluded by name.
 	let lastHead = diff.getHead();
@@ -408,6 +437,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			await hasPending();
 			await bridge.refresh();
 			void refreshDecorations();
+			startSessionInBackground();
 		}),
 		vscode.commands.registerCommand('hunk-review.editComment', (comment: HunkComment) => {
 			const thread = comment?.parent;

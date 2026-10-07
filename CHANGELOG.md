@@ -2,6 +2,12 @@
 
 All notable changes to the "hunk-review" extension will be documented in this file.
 
+## [0.4.0]
+
+- Adding a comment starts the hunk session in the background if it isn't running yet.
+- `.hunk-review/.gitignore` is created on every store write, so a comment added before opening the review no longer leaves `.hunk-review/` untracked in git.
+- Fix a grey background flickering over code: the changed-lines highlight is now drawn only in diff editors and re-applied on tab switches instead of disappearing until the next save.
+
 ## [0.3.1]
 
 - Only changed lines can be commented: files without changes no longer offer a commenting range, since hunk only knows files in the diff and such comments could never be sent. New files (staged or untracked) stay commentable as a whole.

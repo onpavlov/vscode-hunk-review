@@ -5,6 +5,7 @@
 	"Comment sync error: expected {0} applied, got {1}. Statuses not updated.": "Ошибка синхронизации комментариев: ожидалось {0} применённых, получено {1}. Статусы не обновлены.",
 	"Sent {0} comment(s). hunk session is running in the background.": "Отправлено комментариев: {0}. hunk-сессия работает в фоне.",
 	"Failed to send comments: {0}": "Не удалось отправить комментарии: {0}",
+	"Failed to start hunk session: {0}": "Не удалось запустить сессию hunk: {0}",
 	"Git repository not found": "Git-репозиторий не найден",
 	"No uncommitted changes": "Незакоммиченных изменений нет",
 	"hunk session ended": "hunk-сессия завершилась",
