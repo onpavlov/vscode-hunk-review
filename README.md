@@ -19,7 +19,13 @@ where a coding agent can read them.
 - "Connect to session" (`hunk-review.connectToSession`) — reveals the hidden
   terminal with the running hunk TUI so you can interact with the session.
 - Picks up agent replies and notes from hunk into VS Code threads (replies
-  land in the thread of the original comment).
+  land in the thread of the original comment). They are cached in
+  `.hunk-review/comments.json`, so they stay visible after the hunk session
+  ends (window reload, crash, auto-stop).
+- Lets you answer them: the Reply button on an agent note opens an editor for
+  your answer; the reply is queued like any comment and sent as a threaded
+  reply to that note (hunk 0.22+). If that note is gone by the time you send (e.g. the session
+  restarted), the reply goes out as a regular comment on the same line.
 - Keeps the review live: saving files or git operations (commit/stash/checkout)
   refresh the highlights and threads, reload the hunk session contents so the
   agent reviews fresh code, and mark comments whose lines drifted out of the
@@ -35,7 +41,8 @@ where a coding agent can read them.
 
 ## Requirements
 
-- [hunk](https://hunk.dev) CLI in `PATH` (verified with 0.21.1) — see the
+- [hunk](https://hunk.dev) CLI in `PATH` (verified with 0.21.1 and 0.23.0; replying
+  to agent notes needs 0.22+) — see the
   [install docs](https://www.hunk.dev/docs/start/install/).
 - VS Code 1.136+.
 
@@ -92,7 +99,8 @@ check-types`, `npm run lint`. Build: `npm run compile`; production package:
 3. "Send Comments to Agent" → a hidden terminal with the hunk
    TUI starts in the background, comments are sent as a batch and become
    `you (sent)`. Use "Connect to Session" to open the TUI.
-4. Agent replies arrive in the threads automatically (~5 s).
+4. Agent replies arrive in the threads automatically (~5 s). Answer with the
+   Reply button on a note and send again to continue the discussion.
 5. Once you commit or revert the changes, the background session stops
    itself.
 
@@ -100,7 +108,8 @@ check-types`, `npm run lint`. Build: `npm run compile`; production package:
 
 - `hunk-review.githubUsername` — GitHub username used for your avatar on
   review comments (`https://github.com/<username>.png`). Leave empty to
-  auto-detect from a GitHub noreply commit email in your git config, if set.
+  auto-detect from the GitHub account signed in to VS Code (Accounts menu), or
+  else from a GitHub noreply commit email in your git config.
 
 ## Known Issues
 

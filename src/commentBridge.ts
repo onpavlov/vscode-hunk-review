@@ -3,6 +3,24 @@ import type { HunkNote, StoredComment } from './types.js';
 import type { CommentStore } from './commentStore.js';
 import type { ChangedLines } from './diffService.js';
 
+/**
+ * Re-applies a thread's range to VS Code even when the new range equals the
+ * extension host's cached copy. `ExtHostCommentThread.range`'s setter is a no-op
+ * in that case, but VS Code's main thread can have silently collapsed the comment
+ * glyph to the start of an external edit (the glyph's tracked decoration carries
+ * `collapseOnReplaceEdit: true`), so the two sides disagree and a plain
+ * `thread.range = range` never restores the anchor. Assigning a different range
+ * first makes the second assignment emit an update; both writes are coalesced by
+ * the 100 ms debounce in `eventuallyUpdateCommentThread`, so only the real range
+ * is sent — no flicker.
+ */
+function forceThreadRange(thread: vscode.CommentThread, range: vscode.Range): void {
+	// (0,0)-(0,0) never equals a real anchor: real ranges end on the
+	// MAX_SAFE_INTEGER column, this one ends on column 0.
+	thread.range = new vscode.Range(0, 0, 0, 0);
+	thread.range = range;
+}
+
 function statusLabel(status: StoredComment['status']): string | undefined {
 	switch (status) {
 		case 'pending':
@@ -28,6 +46,12 @@ export interface ThreadCommentDescriptor {
 	storeId?: string;
 	/** menu gate: 'pending' shows edit+delete, 'stale' shows delete only; unset (sent) has neither */
 	contextValue?: 'pending' | 'stale';
+	/** hunk note id, set for notes from the session (agent replies, TUI notes) — what "Reply" answers */
+	noteId?: string;
+	/** id in hunk's reply tree: note id, or our comment's sessionCommentId (store id until sent) */
+	treeId?: string;
+	/** treeId of the comment this one answers (hunk `parentId` / our `replyTo`) */
+	parentTreeId?: string;
 }
 
 export interface ThreadDescriptor {
@@ -78,6 +102,8 @@ export function buildThreadDescriptors(
 			readOnly: c.status !== 'pending',
 			storeId: c.status !== 'sent' ? c.id : undefined,
 			contextValue: c.status === 'pending' || c.status === 'stale' ? c.status : undefined,
+			treeId: c.sessionCommentId ?? c.id,
+			parentTreeId: c.replyTo,
 		};
 		if (existing) {
 			existing.comments.push(descriptor);
@@ -116,6 +142,9 @@ export function buildThreadDescriptors(
 			body: n.body,
 			timestamp: new Date(n.createdAt),
 			readOnly: true,
+			noteId: n.noteId,
+			treeId: n.noteId,
+			parentTreeId: n.parentId,
 		};
 		const existing = threads.get(key);
 		if (existing) {
@@ -133,13 +162,70 @@ export function buildThreadDescriptors(
 		}
 	}
 
+	for (const t of threads.values()) {
+		t.comments = orderAsReplyTree(t.comments);
+	}
 	return [...threads.values()];
 }
 
-/** Comment with an attached storeId/parent so edit/delete/save commands can identify and mutate it. */
+/**
+ * VS Code renders a thread as a flat list, so hunk's reply tree is flattened depth-first:
+ * every reply follows the comment it answers (siblings chronologically) and gets a
+ * "↳ reply to <author>" label. A reply whose parent isn't in this thread counts as a root.
+ */
+function orderAsReplyTree(comments: ThreadCommentDescriptor[]): ThreadCommentDescriptor[] {
+	const byTreeId = new Map(
+		comments.filter((c) => c.treeId).map((c) => [c.treeId!, c] as const),
+	);
+	const parentOf = (c: ThreadCommentDescriptor) => {
+		const p = c.parentTreeId ? byTreeId.get(c.parentTreeId) : undefined;
+		return p === c ? undefined : p;
+	};
+	const children = new Map<ThreadCommentDescriptor | undefined, ThreadCommentDescriptor[]>();
+	for (const c of comments) {
+		const p = parentOf(c);
+		children.set(p, [...(children.get(p) ?? []), c]);
+	}
+	const ordered: ThreadCommentDescriptor[] = [];
+	const visit = (parent: ThreadCommentDescriptor | undefined) => {
+		const kids = (children.get(parent) ?? []).sort(
+			(a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+		);
+		for (const c of kids) {
+			if (ordered.includes(c)) {
+				continue; // malformed parent cycle — never loop
+			}
+			if (parent) {
+				c.label = [vscode.l10n.t('↳ reply to {0}', parent.author), c.label]
+					.filter(Boolean)
+					.join(' · ');
+			}
+			ordered.push(c);
+			visit(c);
+		}
+	};
+	visit(undefined);
+	// Members of a parent cycle are unreachable from the roots — keep them, unlabeled.
+	return [...ordered, ...comments.filter((c) => !ordered.includes(c))];
+}
+
+/** Where a thread sits: file plus 1-based line on the diff side the thread renders on. */
+export interface ThreadAnchor {
+	file: string;
+	side: 'old' | 'new';
+	line: number;
+}
+
+/**
+ * Comment with an attached storeId/parent so edit/delete/save commands can identify and mutate it.
+ * 'note' = hunk note with a Reply button; 'replyDraft' = unsaved reply open in the editing textarea.
+ */
 export interface HunkComment extends vscode.Comment {
 	storeId?: string;
-	contextValue?: 'pending' | 'stale' | 'editing';
+	noteId?: string;
+	/** for a 'replyDraft': the note being answered */
+	replyTo?: string;
+	contextValue?: 'pending' | 'stale' | 'editing' | 'note' | 'replyDraft';
 	/** back-reference to the owning thread, filled in right after creation */
 	parent?: vscode.CommentThread;
 }
@@ -148,6 +234,7 @@ export class CommentBridge {
 	private controller?: vscode.CommentController;
 	private extensionUri?: vscode.Uri;
 	private threadByKey = new Map<string, vscode.CommentThread>();
+	private anchorByKey = new Map<string, ThreadAnchor>();
 	// Refresh queue: concurrent calls (sendComments + onDidChange)
 	// without serialization create duplicate threads — orphaned copies linger in the UI.
 	private refreshChain: Promise<void> = Promise.resolve();
@@ -160,7 +247,19 @@ export class CommentBridge {
 		private readonly originalUri: (file: string) => vscode.Uri,
 		/** Cached GitHub avatar for the 'user' role; undefined falls back to the local icon. */
 		private readonly resolveUserAvatarUri: () => vscode.Uri | undefined = () => undefined,
+		/** Whether the installed hunk accepts `replyTo` (0.22+); gates the Reply button on notes. */
+		private readonly repliesSupported: () => boolean = () => false,
 	) {}
+
+	/** Anchor of a thread this bridge manages; undefined for a draft ("Start discussion") thread. */
+	threadAnchor(thread: vscode.CommentThread): ThreadAnchor | undefined {
+		for (const [key, t] of this.threadByKey) {
+			if (t === thread) {
+				return this.anchorByKey.get(key);
+			}
+		}
+		return undefined;
+	}
 
 	activate(context: vscode.ExtensionContext): void {
 		this.extensionUri = context.extensionUri;
@@ -208,8 +307,11 @@ export class CommentBridge {
 		const descriptors = buildThreadDescriptors(storeData.comments, notes);
 		const seenKeys = new Set<string>();
 
+		const repliesSupported = this.repliesSupported();
+		this.anchorByKey.clear();
 		for (const d of descriptors) {
 			seenKeys.add(d.threadKey);
+			this.anchorByKey.set(d.threadKey, { file: d.file, side: d.side, line: d.start });
 			const uri =
 				d.side === 'old'
 					? this.originalUri(d.file)
@@ -227,7 +329,8 @@ export class CommentBridge {
 					// one comment into Editing on demand (see extension.ts).
 					mode: vscode.CommentMode.Preview,
 					storeId: c.storeId,
-					contextValue: c.contextValue,
+					noteId: c.noteId,
+					contextValue: c.noteId && repliesSupported ? 'note' : c.contextValue,
 				}),
 			);
 
@@ -237,7 +340,7 @@ export class CommentBridge {
 				// (or reassigning collapsibleState) resets whatever expand/collapse
 				// state the user set by hand in the UI, since VS Code only consults
 				// collapsibleState when the thread is first created.
-				existing.range = range;
+				forceThreadRange(existing, range);
 				// Comments currently open in the native editing textarea keep their exact
 				// object (unsaved input and Editing mode intact) instead of being replaced —
 				// background refreshes (polling, other threads' saves) used to blow away
@@ -247,14 +350,22 @@ export class CommentBridge {
 						.filter((c) => c.contextValue === 'editing')
 						.map((c) => [c.storeId, c] as const),
 				);
-				existing.comments = comments.map((c) => {
-					const editing = c.storeId ? editingByStoreId.get(c.storeId) : undefined;
-					return editing ?? (({ ...c, parent: existing }) as HunkComment);
-				});
+				// An open reply draft has no store entry yet — carry it over as-is, last.
+				const drafts = (existing.comments as HunkComment[]).filter(
+					(c) => c.contextValue === 'replyDraft',
+				);
+				existing.comments = [
+					...comments.map((c) => {
+						const editing = c.storeId ? editingByStoreId.get(c.storeId) : undefined;
+						return editing ?? (({ ...c, parent: existing }) as HunkComment);
+					}),
+					...drafts,
+				];
 				continue;
 			}
 
 			const thread = this.controller.createCommentThread(uri, range, comments);
+			// No always-on reply box: replies start from the Reply button on a note.
 			thread.canReply = false;
 			// Threads with nothing left to act on start collapsed, so the diff
 			// isn't wall-to-wall boxes for every already-sent or agent comment.

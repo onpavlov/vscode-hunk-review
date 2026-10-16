@@ -1,6 +1,7 @@
 import * as assert from 'node:assert';
 import {
 	findOutOfDiffCommentIds,
+	findOutOfDiffNoteIds,
 	findStaleCommentIds,
 	hunksToChangedLines,
 	isLineInDiff,
@@ -45,6 +46,11 @@ suite('findStaleCommentIds', () => {
 	test('marks pending comments outside every changed range stale', () => {
 		const ids = findStaleCommentIds([comment('c1', 'a.ts', 10)], changed);
 		assert.deepStrictEqual(ids, ['c1']);
+	});
+
+	test('never marks a pending reply stale: hunk anchors it to its parent note', () => {
+		const ids = findStaleCommentIds([{ ...comment('r1', 'a.ts', 10), replyTo: 'mcp:1' }], changed);
+		assert.deepStrictEqual(ids, []);
 	});
 
 	test('marks pending comments in files without changes stale', () => {
@@ -154,5 +160,29 @@ suite('findStaleCommentIds', () => {
 		test('empty review yields empty map', () => {
 			assert.strictEqual(hunksToChangedLines({ files: [] }).size, 0);
 		});
+	});
+});
+
+suite('findOutOfDiffNoteIds', () => {
+	test('returns notes whose new-side anchor left the diff', () => {
+		const changed = {
+			newLines: new Map<string, LineRange[]>([['a.ts', [{ start: 2, end: 4 }]]]),
+			oldLines: new Map<string, LineRange[]>(),
+		};
+		const note = (noteId: string, filePath: string, line: number) => ({
+			noteId,
+			source: 'agent',
+			filePath,
+			hunkIndex: 0,
+			newRange: [line, line] as [number, number],
+			body: '',
+			createdAt: '',
+			editable: false,
+		});
+		const ids = findOutOfDiffNoteIds(
+			[note('in', 'a.ts', 3), note('out', 'a.ts', 9), note('gone', 'b.ts', 1)],
+			changed,
+		);
+		assert.deepStrictEqual(ids, ['out', 'gone']);
 	});
 });

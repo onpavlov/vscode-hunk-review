@@ -5,7 +5,6 @@ import type {
 	HunkNote,
 	HunkReviewResult,
 	HunkSession,
-	NoteListResult,
 } from './types.js';
 
 export class HunkNotInstalledError extends Error {
@@ -56,7 +55,44 @@ export const defaultRunner: HunkRunner = (file, args, options) =>
 	});
 
 function parseJson<T>(stdout: string): T {
-	return JSON.parse(stdout) as T;
+	try {
+		return JSON.parse(stdout) as T;
+	} catch {
+		throw new HunkCommandError('hunk returned invalid JSON', stdout);
+	}
+}
+
+/** One `session comment apply` item: either a line anchor or a `replyTo` parent note, never both. */
+export type ApplyCommentItem =
+	| { filePath: string; newLine?: number; oldLine?: number; summary: string; author?: string }
+	| { replyTo: string; summary: string; author?: string };
+
+/** First hunk release whose `session comment add/apply` accept `replyTo` (modem-dev/hunk#1012). */
+const REPLY_MIN_VERSION: [number, number] = [0, 22];
+export const REPLY_MIN_VERSION_LABEL = `${REPLY_MIN_VERSION[0]}.${REPLY_MIN_VERSION[1]}.0`;
+
+function parseMajorMinor(version: string | undefined): [number, number] | undefined {
+	const m = /(\d+)\.(\d+)\.\d+/.exec(version ?? '');
+	return m ? [Number(m[1]), Number(m[2])] : undefined;
+}
+
+function meetsReplyMin([major, minor]: [number, number]): boolean {
+	return major > REPLY_MIN_VERSION[0] || (major === REPLY_MIN_VERSION[0] && minor >= REPLY_MIN_VERSION[1]);
+}
+
+/** Whether a `hunk --version` string is new enough to send replies to existing notes. */
+export function supportsReplies(version: string | undefined): boolean {
+	const parsed = parseMajorMinor(version);
+	return parsed !== undefined && meetsReplyMin(parsed);
+}
+
+/**
+ * Whether `hunk --version` names a release known to predate replies. An unparseable
+ * string (dev build) is not "too old" — replies stay off, but nobody is nagged to update.
+ */
+export function isHunkTooOldForReplies(version: string | undefined): boolean {
+	const parsed = parseMajorMinor(version);
+	return parsed !== undefined && !meetsReplyMin(parsed);
 }
 
 function normalizeRepoRoot(p: string): string {
@@ -97,6 +133,11 @@ export class HunkCli {
 		return err instanceof Error ? err : new Error(String(err));
 	}
 
+	async version(): Promise<string> {
+		const { stdout } = await this.run(['--version']);
+		return stdout.trim();
+	}
+
 	async listSessions(): Promise<HunkSession[]> {
 		const { stdout } = await this.run(['session', 'list', '--json']);
 		return parseJson<{ sessions: HunkSession[] }>(stdout).sessions;
@@ -119,7 +160,7 @@ export class HunkCli {
 
 	async applyComments(
 		repoRoot: string,
-		batch: { comments: Array<{ filePath: string; newLine?: number; oldLine?: number; summary: string }> },
+		batch: { comments: ApplyCommentItem[] },
 	): Promise<ApplyResult> {
 		const { stdout } = await this.run(
 			['session', 'comment', 'apply', '--repo', repoRoot, '--stdin', '--json'],

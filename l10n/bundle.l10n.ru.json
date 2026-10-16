@@ -39,5 +39,7 @@
 	"Open install docs": "Открыть инструкцию по установке",
 	"The hunk CLI was not found in PATH. Comments are saved locally, but sending them to an agent needs hunk. Install it with \"{0}\" (or via Homebrew / the install script), then reload the window.": "hunk CLI не найден в PATH. Комментарии сохраняются локально, но для отправки агенту нужен hunk. Установите его командой «{0}» (или через Homebrew / установочный скрипт) и перезагрузите окно.",
 	"Archived {0} comment(s) after the commit.": "После коммита перенесено в архив комментариев: {0}.",
-	"Comments can only be added to changed lines.": "Комментарии можно оставлять только на изменённых строках."
+	"Comments can only be added to changed lines.": "Комментарии можно оставлять только на изменённых строках.",
+	"↳ reply to {0}": "↳ ответ на {0}",
+	"hunk {0} is older than {1}: replying to agent notes is unavailable. Update hunk, then reload the window.": "hunk {0} старше {1}: отвечать на заметки агента нельзя. Обновите hunk и перезагрузите окно."
 }

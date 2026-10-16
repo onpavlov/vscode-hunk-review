@@ -21,7 +21,8 @@ function configuredUsername(): string | undefined {
 export interface UserAvatarResolver {
 	/** Cached avatar URI from the last refresh(), or undefined if no username is known. */
 	uri(): vscode.Uri | undefined;
-	/** Re-resolves from the `githubUsername` setting, falling back to a git noreply email. */
+	/** Re-resolves from the `githubUsername` setting, then the GitHub account signed in to
+	 *  VS Code, then a git noreply email. */
 	refresh(): Promise<void>;
 }
 
@@ -32,6 +33,7 @@ export interface UserAvatarResolver {
  */
 export function createUserAvatarResolver(
 	getUserEmail: () => Promise<string | undefined>,
+	getGithubLogin: () => Promise<string | undefined> = async () => undefined,
 ): UserAvatarResolver {
 	let cached: vscode.Uri | undefined;
 
@@ -39,8 +41,24 @@ export function createUserAvatarResolver(
 		uri: () => cached,
 		async refresh() {
 			const username =
-				configuredUsername() ?? parseGithubNoreplyUsername((await getUserEmail()) ?? '');
+				configuredUsername() ??
+				(await getGithubLogin()) ??
+				parseGithubNoreplyUsername((await getUserEmail()) ?? '');
 			cached = username ? githubAvatarUri(username) : undefined;
 		},
 	};
+}
+
+/**
+ * Login of the GitHub account signed in to VS Code (Accounts menu), if any. `getAccounts`
+ * only lists accounts — unlike `getSession` it needs no consent and never prompts.
+ */
+export async function signedInGithubLogin(): Promise<string | undefined> {
+	try {
+		const accounts = await vscode.authentication.getAccounts('github');
+		return accounts[0]?.label || undefined;
+	} catch {
+		// GitHub authentication provider unavailable (e.g. disabled built-in extension)
+		return undefined;
+	}
 }

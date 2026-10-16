@@ -1,7 +1,15 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { createHunkCli, HunkCommandError, HunkNotInstalledError } from './hunkCli.js';
+import {
+	createHunkCli,
+	HunkCommandError,
+	HunkNotInstalledError,
+	isHunkTooOldForReplies,
+	REPLY_MIN_VERSION_LABEL,
+	supportsReplies,
+} from './hunkCli.js';
+import type { ApplyCommentItem } from './hunkCli.js';
 import { CommentStore, ensureGitignore } from './commentStore.js';
 import { DiffService } from './diffService.js';
 import { CommentBridge } from './commentBridge.js';
@@ -13,12 +21,18 @@ import { createDebouncer } from './debounce.js';
 import { formatStatusText } from './statusText.js';
 import {
 	findOutOfDiffCommentIds,
+	findOutOfDiffNoteIds,
 	findStaleCommentIds,
 	hunksToChangedLines,
 	isLineInDiff,
 } from './staleComments.js';
 import type { ChangedLines } from './diffService.js';
-import { createUserAvatarResolver } from './userAvatar.js';
+import { createUserAvatarResolver, signedInGithubLogin } from './userAvatar.js';
+
+// hunk marks `session comment apply` notes as agent-sourced (source: "agent").
+// The apply JSON exposes no `source`/`type` field, only `author` — set it so the
+// coding agent can recognize these as human-authored review comments.
+const REVIEW_AUTHOR = 'user';
 
 export function activate(context: vscode.ExtensionContext): void {
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -36,14 +50,19 @@ export function activate(context: vscode.ExtensionContext): void {
 	const sync = new HunkSync(cli, root, {
 		isSessionAlive: () => cli.findSession(root).then((s) => s !== undefined),
 	});
-	const userAvatar = createUserAvatarResolver(() => diff.getUserEmail());
+	const userAvatar = createUserAvatarResolver(() => diff.getUserEmail(), signedInGithubLogin);
+	// Resolved from `hunk --version` at activation; stays false (no reply box) until then
+	// or when hunk is missing / older than 0.22.
+	let repliesSupported = false;
 	const bridge = new CommentBridge(
 		store,
-		() =>
-			sessionManager.currentSession() ? Promise.resolve(sync.getNotes()) : Promise.resolve([]),
+		// Notes come from the store, not the live session: cached there by each poll,
+		// they survive the session ending (window reload, crash, auto-stop).
+		() => store.load().then((d) => d.notes ?? []),
 		() => diff.getChangedLines(),
 		(file) => diff.getOriginalUri(vscode.Uri.joinPath(vscode.Uri.file(root), file)),
 		() => userAvatar.uri(),
+		() => repliesSupported,
 	);
 	const sessionManager = new SessionManager(cli, root, undefined, undefined, () =>
 		diff.isWorktreeClean(),
@@ -127,6 +146,28 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 
+	// Once per installed hunk version: the warning would otherwise return on every
+	// window reload for someone who can't or won't update right away.
+	const TOO_OLD_WARNED_KEY = 'hunk-review.tooOldWarnedVersion';
+	const warnHunkTooOld = async (version: string) => {
+		if (context.globalState.get<string>(TOO_OLD_WARNED_KEY) === version) {
+			return;
+		}
+		await context.globalState.update(TOO_OLD_WARNED_KEY, version);
+		const docs = vscode.l10n.t('Open install docs');
+		const pick = await vscode.window.showWarningMessage(
+			vscode.l10n.t(
+				'hunk {0} is older than {1}: replying to agent notes is unavailable. Update hunk, then reload the window.',
+				version,
+				REPLY_MIN_VERSION_LABEL,
+			),
+			docs,
+		);
+		if (pick === docs) {
+			await vscode.env.openExternal(vscode.Uri.parse(INSTALL_DOCS_URL));
+		}
+	};
+
 	const checkHunkInstalled = async () => {
 		try {
 			await cli.listSessions();
@@ -156,13 +197,23 @@ export function activate(context: vscode.ExtensionContext): void {
 						vscode.l10n.t('Found several hunk sessions in this repository — using the first one.'),
 					);
 				}
+				// A reply whose parent note is gone (session restarted, note deleted) would fail
+				// the whole batch — it goes out as a regular comment on its anchor line instead.
+				const liveNoteIds = pending.some((c) => c.replyTo) && repliesSupported
+					? new Set((await cli.listNotes(root)).map((n) => n.noteId))
+					: new Set<string>();
 				const result = await cli.applyComments(root, {
-					comments: pending.map((c) => ({
-						filePath: c.filePath,
-						newLine: c.target.newLine,
-						oldLine: c.target.oldLine,
-						summary: c.summary,
-					})),
+					comments: pending.map((c): ApplyCommentItem =>
+						c.replyTo && liveNoteIds.has(c.replyTo)
+							? { replyTo: c.replyTo, summary: c.summary, author: REVIEW_AUTHOR }
+							: {
+								filePath: c.filePath,
+								newLine: c.target.newLine,
+								oldLine: c.target.oldLine,
+								summary: c.summary,
+								author: REVIEW_AUTHOR,
+							},
+					),
 				});
 				// Guard: applied count must match pending count before flipping statuses.
 				if (result.applied.length !== pending.length) {
@@ -250,8 +301,12 @@ export function activate(context: vscode.ExtensionContext): void {
 		if (!prev?.commit || !head?.commit || prev.commit === head.commit || prev.name !== head.name) {
 			return;
 		}
-		const { comments } = await store.load();
-		const archived = await store.archive(findOutOfDiffCommentIds(comments, changed), head.commit);
+		const { comments, notes = [] } = await store.load();
+		const archived = await store.archive(
+			findOutOfDiffCommentIds(comments, changed),
+			head.commit,
+			findOutOfDiffNoteIds(notes, changed),
+		);
 		if (archived > 0) {
 			void vscode.window.showInformationMessage(
 				vscode.l10n.t('Archived {0} comment(s) after the commit.', archived),
@@ -347,6 +402,37 @@ export function activate(context: vscode.ExtensionContext): void {
 		);
 	};
 
+	const removeReplyDraft = (draft: HunkComment) => {
+		const thread = draft.parent;
+		if (thread) {
+			thread.comments = thread.comments.filter((c) => c !== draft);
+		}
+	};
+
+	// The reply inherits its parent note's anchor in hunk, so unlike a new comment
+	// it skips the changed-lines check; the stored line only places it in the thread.
+	const saveReplyDraft = async (draft: HunkComment) => {
+		const summary = (typeof draft.body === 'string' ? draft.body : draft.body.value).trim();
+		if (!summary) {
+			void vscode.window.showInformationMessage(vscode.l10n.t('Comment cannot be empty.'));
+			return;
+		}
+		const anchor = draft.parent ? bridge.threadAnchor(draft.parent) : undefined;
+		if (!anchor || !draft.replyTo) {
+			return;
+		}
+		await store.add(
+			anchor.file,
+			anchor.side === 'old' ? { oldLine: anchor.line } : { newLine: anchor.line },
+			summary,
+			draft.replyTo,
+		);
+		removeReplyDraft(draft);
+		await hasPending();
+		await bridge.refresh();
+		startSessionInBackground();
+	};
+
 	context.subscriptions.push(
 		statusBar,
 		sendStatusBar,
@@ -354,9 +440,14 @@ export function activate(context: vscode.ExtensionContext): void {
 		bridge,
 		sessionManager,
 		sync,
-		// Wire sync changes to bridge refresh (C2: arrived notes trigger display update).
-		sync.onDidChange(() => {
-			void bridge.refresh();
+		// Wire sync changes to bridge refresh (C2: arrived notes trigger display update);
+		// notes are cached in comments.json first, since the bridge renders from there.
+		sync.onDidChange(async (notes) => {
+			const session = sessionManager.currentSession();
+			if (session) {
+				await store.mergeNotes(session.sessionId, notes).catch(() => undefined);
+			}
+			await bridge.refresh();
 		}),
 		sync.onSessionLost(() => {
 			sessionManager.clearSession();
@@ -365,6 +456,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		}),
 		vscode.workspace.onDidChangeConfiguration((e) => {
 			if (e.affectsConfiguration('hunk-review.githubUsername')) {
+				void userAvatar.refresh().then(() => bridge.refresh());
+			}
+		}),
+		vscode.authentication.onDidChangeSessions((e) => {
+			if (e.provider.id === 'github') {
 				void userAvatar.refresh().then(() => bridge.refresh());
 			}
 		}),
@@ -452,7 +548,31 @@ export function activate(context: vscode.ExtensionContext): void {
 					: c,
 			);
 		}),
+		vscode.commands.registerCommand('hunk-review.replyToNote', (note: HunkComment) => {
+			const thread = note?.parent;
+			if (!note?.noteId || !thread) {
+				return;
+			}
+			// One draft per thread: a second click just keeps the open one.
+			if ((thread.comments as HunkComment[]).some((c) => c.contextValue === 'replyDraft')) {
+				return;
+			}
+			const draft: HunkComment = {
+				body: '',
+				author: { name: vscode.l10n.t('You'), iconPath: userAvatar.uri() },
+				mode: vscode.CommentMode.Editing,
+				contextValue: 'replyDraft',
+				replyTo: note.noteId,
+				parent: thread,
+			};
+			thread.comments = [...thread.comments, draft];
+			thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+		}),
 		vscode.commands.registerCommand('hunk-review.saveComment', async (comment: HunkComment) => {
+			if (comment?.contextValue === 'replyDraft') {
+				await saveReplyDraft(comment);
+				return;
+			}
 			const id = comment?.storeId;
 			if (!id) {
 				return;
@@ -467,6 +587,10 @@ export function activate(context: vscode.ExtensionContext): void {
 			await bridge.refresh();
 		}),
 		vscode.commands.registerCommand('hunk-review.cancelEditComment', async (comment: HunkComment) => {
+			if (comment?.contextValue === 'replyDraft') {
+				removeReplyDraft(comment);
+				return;
+			}
 			// Store wasn't touched — exiting Editing mode locally and refreshing
 			// rebuilds this comment from the store, discarding the in-progress edit.
 			exitEditingMode(comment);
@@ -515,6 +639,16 @@ export function activate(context: vscode.ExtensionContext): void {
 	// Resolves in the background — comments render with the local fallback icon
 	// until the GitHub avatar is known, then pick it up on the next refresh.
 	void userAvatar.refresh().then(() => bridge.refresh());
+	void cli.version().then(
+		(v) => {
+			repliesSupported = supportsReplies(v);
+			if (isHunkTooOldForReplies(v)) {
+				void warnHunkTooOld(v);
+			}
+			return bridge.refresh();
+		},
+		() => undefined, // missing hunk is reported by checkHunkInstalled when a review opens
+	);
 	// The session may have been started earlier (or the terminal session restarted):
 	// on activation, look for a live session and enable comment polling.
 	void sessionManager.findSession().then((s) => {
@@ -541,6 +675,7 @@ function registerStubCommands(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('hunk-review.menu', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.addComment', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.editComment', noWorkspace),
+		vscode.commands.registerCommand('hunk-review.replyToNote', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.saveComment', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.cancelEditComment', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.deleteComment', noWorkspace),

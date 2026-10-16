@@ -114,6 +114,83 @@ suite('buildThreadDescriptors', () => {
 		assert.strictEqual(desc.find((d) => d.comments[0].storeId === 'n')?.side, 'new');
 	});
 
+	test('hunk notes carry their note id so Reply can answer them; own comments do not', () => {
+		const note: HunkNote = {
+			noteId: 'mcp:1',
+			source: 'agent',
+			filePath: 'src/a.ts',
+			hunkIndex: 0,
+			newRange: [10, 10],
+			body: 'agent',
+			createdAt: '2026-09-10T00:00:01Z',
+			editable: false,
+		};
+		const desc = buildThreadDescriptors([stored({ status: 'sent', sessionCommentId: 'mcp:0' })], [note]);
+		assert.deepStrictEqual(desc[0].comments.map((c) => c.noteId), [undefined, 'mcp:1']);
+	});
+
+	test('a pending reply renders after the agent note it answers', () => {
+		const note: HunkNote = {
+			noteId: 'mcp:1',
+			source: 'agent',
+			filePath: 'src/a.ts',
+			hunkIndex: 0,
+			newRange: [10, 10],
+			body: 'agent',
+			createdAt: '2026-09-10T00:00:01Z',
+			editable: false,
+		};
+		const desc = buildThreadDescriptors(
+			[
+				stored({ id: 'q', status: 'sent', createdAt: '2026-09-10T00:00:00Z' }),
+				stored({ id: 'r', summary: 'reply', replyTo: 'mcp:1', createdAt: '2026-09-10T00:00:09Z' }),
+			],
+			[note],
+		);
+		assert.deepStrictEqual(desc[0].comments.map((c) => c.body), ['ours', 'agent', 'reply']);
+	});
+
+	test('replies follow their parent depth-first and get a "reply to" label', () => {
+		const note = (noteId: string, createdAt: string, parentId?: string): HunkNote => ({
+			noteId,
+			parentId,
+			source: 'agent',
+			filePath: 'src/a.ts',
+			hunkIndex: 0,
+			newRange: [10, 10],
+			body: noteId,
+			createdAt,
+			editable: false,
+		});
+		const desc = buildThreadDescriptors(
+			[
+				stored({
+					id: 'r1',
+					summary: 'r1',
+					status: 'sent',
+					sessionCommentId: 'mcp:r1',
+					replyTo: 'n1',
+					createdAt: '2026-09-10T00:00:03Z',
+				}),
+			],
+			[
+				note('n1', '2026-09-10T00:00:01Z'),
+				note('n3', '2026-09-10T00:00:02Z'),
+				note('n2', '2026-09-10T00:00:04Z', 'mcp:r1'),
+			],
+		);
+		assert.strictEqual(desc.length, 1);
+		assert.deepStrictEqual(
+			desc[0].comments.map((c) => [c.body, c.label]),
+			[
+				['n1', undefined],
+				['r1', '↳ reply to AI Agent · sent'],
+				['n2', '↳ reply to You'],
+				['n3', undefined],
+			],
+		);
+	});
+
 	test('pending gets edit+delete, stale gets delete only, sent gets neither', () => {
 		const desc = buildThreadDescriptors(
 			[

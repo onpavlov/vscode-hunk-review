@@ -3,6 +3,20 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { CommentStore, ensureGitignore } from '../commentStore.js';
+import type { HunkNote } from '../types.js';
+
+function note(noteId: string): HunkNote {
+	return {
+		noteId,
+		source: 'agent',
+		filePath: 'src/a.ts',
+		hunkIndex: 0,
+		newRange: [1, 1],
+		body: noteId,
+		createdAt: '2026-10-09T00:00:00Z',
+		editable: false,
+	};
+}
 
 function tmpDir(): string {
 	return fs.mkdtempSync(path.join(os.tmpdir(), 'hunk-review-store-'));
@@ -21,6 +35,62 @@ suite('CommentStore', () => {
 		assert.strictEqual(data.comments.length, 1);
 		assert.strictEqual(data.comments[0].id, c.id);
 		assert.strictEqual(data.comments[0].target.newLine, 5);
+	});
+
+	test('add persists replyTo for a reply to a hunk note', async () => {
+		const dir = tmpDir();
+		const c = await new CommentStore(dir).add('src/a.ts', { newLine: 5 }, 'done', 'mcp:3');
+		assert.strictEqual(c.replyTo, 'mcp:3');
+		const data = await new CommentStore(dir).load();
+		assert.strictEqual(data.comments[0].replyTo, 'mcp:3');
+	});
+
+	test('loads a comments.json written before notes existed as having no notes', async () => {
+		const dir = tmpDir();
+		fs.writeFileSync(
+			path.join(dir, 'comments.json'),
+			JSON.stringify({ version: 1, comments: [] }),
+		);
+		assert.deepStrictEqual((await new CommentStore(dir).load()).notes, []);
+	});
+
+	test('mergeNotes caches notes and keeps them after the session is gone', async () => {
+		const dir = tmpDir();
+		const store = new CommentStore(dir);
+		await store.mergeNotes('s1', [note('n1'), note('n2')]);
+		// n2 deleted in hunk during s1: dropped. A new session s2 doesn't know n1: kept.
+		await store.mergeNotes('s1', [note('n1')]);
+		await store.mergeNotes('s2', [note('m1')]);
+		const notes = (await new CommentStore(dir).load()).notes ?? [];
+		assert.deepStrictEqual(
+			notes.map((n) => [n.noteId, n.sessionId]).sort(),
+			[['m1', 's2'], ['n1', 's1']],
+		);
+	});
+
+	test('mergeNotes keeps comments intact under concurrent writes', async () => {
+		const dir = tmpDir();
+		const store = new CommentStore(dir);
+		await Promise.all([
+			store.add('src/a.ts', { newLine: 1 }, 'one'),
+			store.mergeNotes('s1', [note('n1')]),
+			store.add('src/a.ts', { newLine: 2 }, 'two'),
+		]);
+		const data = await store.load();
+		assert.strictEqual(data.comments.length, 2);
+		assert.strictEqual(data.notes?.length, 1);
+	});
+
+	test('archive moves the given notes along with comments', async () => {
+		const dir = tmpDir();
+		const store = new CommentStore(dir);
+		const c = await store.add('src/a.ts', { newLine: 1 }, 'one');
+		await store.mergeNotes('s1', [note('n1'), note('n2')]);
+		await store.archive([c.id], 'abc', ['n1']);
+		assert.deepStrictEqual((await store.load()).notes?.map((n) => n.noteId), ['n2']);
+		const archive = await store.loadArchive();
+		assert.strictEqual(archive.notes?.[0].noteId, 'n1');
+		assert.strictEqual(archive.notes?.[0].commit, 'abc');
 	});
 
 	test('update changes status and session id', async () => {

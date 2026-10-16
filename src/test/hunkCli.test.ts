@@ -2,7 +2,14 @@ import * as assert from 'node:assert';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { createHunkCli, HunkNotInstalledError, HunkCommandError, HunkRunner } from '../hunkCli.js';
+import {
+	createHunkCli,
+	HunkNotInstalledError,
+	HunkCommandError,
+	HunkRunner,
+	isHunkTooOldForReplies,
+	supportsReplies,
+} from '../hunkCli.js';
 
 suite('HunkCli', () => {
 	test('listSessions parses --json output', async () => {
@@ -43,11 +50,46 @@ suite('HunkCli', () => {
 		};
 		const cli = createHunkCli(runner);
 		const res = await cli.applyComments('/tmp/r', {
-			comments: [{ filePath: 'a.txt', newLine: 2, summary: 'probe' }],
+			comments: [{ filePath: 'a.txt', newLine: 2, summary: 'probe', author: 'user' }],
 		});
 		const batch = JSON.parse(capturedInput);
 		assert.strictEqual(batch.comments[0].newLine, 2);
+		assert.strictEqual(batch.comments[0].author, 'user');
 		assert.strictEqual(res.applied.length, 1);
+	});
+
+	test('applyComments sends a reply as replyTo without a line anchor', async () => {
+		let capturedInput = '';
+		const cli = createHunkCli(async (_file, _args, options) => {
+			capturedInput = options.input ?? '';
+			return { stdout: JSON.stringify({ result: { applied: [] } }), stderr: '' };
+		});
+		await cli.applyComments('/tmp/r', { comments: [{ replyTo: 'mcp:7', summary: 'done' }] });
+		assert.deepStrictEqual(JSON.parse(capturedInput).comments[0], { replyTo: 'mcp:7', summary: 'done' });
+	});
+
+	test('version runs "hunk --version" and trims the output', async () => {
+		const cli = createHunkCli(async (_file, args) => {
+			assert.deepStrictEqual(args, ['--version']);
+			return { stdout: '0.23.0\n', stderr: '' };
+		});
+		assert.strictEqual(await cli.version(), '0.23.0');
+	});
+
+	test('supportsReplies requires hunk 0.22 or newer', () => {
+		assert.strictEqual(supportsReplies('0.21.1'), false);
+		assert.strictEqual(supportsReplies('0.22.0-beta.0'), true);
+		assert.strictEqual(supportsReplies('0.23.0'), true);
+		assert.strictEqual(supportsReplies('1.0.0'), true);
+		assert.strictEqual(supportsReplies('hunk dev'), false);
+		assert.strictEqual(supportsReplies(undefined), false);
+	});
+
+	test('isHunkTooOldForReplies flags only parseable versions below 0.22', () => {
+		assert.strictEqual(isHunkTooOldForReplies('0.21.1'), true);
+		assert.strictEqual(isHunkTooOldForReplies('0.22.0'), false);
+		assert.strictEqual(isHunkTooOldForReplies('hunk dev'), false);
+		assert.strictEqual(isHunkTooOldForReplies(undefined), false);
 	});
 
 	test('reload swaps session contents with "-- diff" tail', async () => {

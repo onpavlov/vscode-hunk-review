@@ -2,7 +2,7 @@
   "name": "hunk-review",
   "displayName": "hunk-review",
   "description": "Comment on uncommitted diffs in native VS Code diff editors and send the comments to a live hunk session for a coding agent to read and reply.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "pavlovon",
   "license": "MIT",
   "icon": "assets/icon.png",
@@ -82,6 +82,12 @@
         "icon": "$(trash)"
       },
       {
+        "command": "hunk-review.replyToNote",
+        "title": "%command.replyToNote.title%",
+        "category": "hunk-review",
+        "icon": "$(reply)"
+      },
+      {
         "command": "hunk-review.saveComment",
         "title": "%command.saveComment.title%",
         "category": "hunk-review",
@@ -118,6 +124,11 @@
       ],
       "comments/comment/title": [
         {
+          "command": "hunk-review.replyToNote",
+          "group": "inline@0",
+          "when": "commentController == hunk-review.comments && comment == note"
+        },
+        {
           "command": "hunk-review.editComment",
           "group": "group@1",
           "when": "commentController == hunk-review.comments && comment == pending"
@@ -132,12 +143,12 @@
         {
           "command": "hunk-review.saveComment",
           "group": "inline@1",
-          "when": "commentController == hunk-review.comments && comment == editing"
+          "when": "commentController == hunk-review.comments && (comment == editing || comment == replyDraft)"
         },
         {
           "command": "hunk-review.cancelEditComment",
           "group": "inline@2",
-          "when": "commentController == hunk-review.comments && comment == editing"
+          "when": "commentController == hunk-review.comments && (comment == editing || comment == replyDraft)"
         }
       ]
     },

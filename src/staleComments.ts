@@ -1,5 +1,5 @@
 import type { ChangedLines, LineRange } from './diffService.js';
-import type { HunkReviewResult, StoredComment } from './types.js';
+import type { HunkNote, HunkReviewResult, StoredComment } from './types.js';
 
 /** Converts hunk ranges from `session review` into a map of changed lines. */
 export function hunksToChangedLines(review: HunkReviewResult): Map<string, LineRange[]> {
@@ -19,14 +19,15 @@ export function hunksToChangedLines(review: HunkReviewResult): Map<string, LineR
  * Finds pending comments whose anchor (file, line) no longer falls
  * inside any changed range of the diff. Returns their store ids.
  * Comments on a deleted line (oldLine) are checked against the old side of the diff,
- * others against the new side.
+ * others against the new side. Replies are skipped: hunk anchors them to their parent
+ * note, which may sit on a context line outside the changed ranges.
  */
 export function findStaleCommentIds(
 	comments: StoredComment[],
 	changedLines: ChangedLines,
 ): string[] {
 	return comments
-		.filter((c) => c.status === 'pending' && !isInDiff(c, changedLines))
+		.filter((c) => c.status === 'pending' && !c.replyTo && !isInDiff(c, changedLines))
 		.map((c) => c.id);
 }
 
@@ -39,6 +40,16 @@ export function findOutOfDiffCommentIds(
 	changedLines: ChangedLines,
 ): string[] {
 	return comments.filter((c) => !isInDiff(c, changedLines)).map((c) => c.id);
+}
+
+/**
+ * Cached notes whose anchor line (new side; replies share their parent's) is no longer
+ * in the diff — archived together with the comments after a commit. Returns note ids.
+ */
+export function findOutOfDiffNoteIds(notes: HunkNote[], changedLines: ChangedLines): string[] {
+	return notes
+		.filter((n) => !isLineInDiff(n.filePath, { newLine: n.newRange?.[0] ?? 1 }, changedLines))
+		.map((n) => n.noteId);
 }
 
 /**

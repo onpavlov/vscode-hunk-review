@@ -2,6 +2,15 @@
 
 All notable changes to the "hunk-review" extension will be documented in this file.
 
+## [0.5.0]
+
+- Reply to agent notes from VS Code: a Reply button on each agent note opens an editor for the answer, which is sent as a threaded `replyTo` reply to that note. Needs hunk 0.22+ (detected via `hunk --version`); if the parent note is gone by send time, the reply goes out as a regular comment on the same line.
+- Warn once per hunk version when the installed hunk is older than 0.22.0, since replying to agent notes needs it.
+- Threads show hunk's reply tree: each reply follows the comment it answers and is labeled "↳ reply to <author>"; siblings are in chronological order.
+- Agent replies and hunk notes are cached in `.hunk-review/comments.json` (new optional `notes` field) and stay visible after the hunk session ends — previously a window reload killed the session and lost them. They are archived with the comments after a commit. Older extension versions ignore the field and drop it on their next write.
+- Your avatar is auto-detected from the GitHub account signed in to VS Code (Accounts menu) when `hunk-review.githubUsername` is empty, before falling back to a GitHub noreply commit email.
+- Comments sent from VS Code carry `author: "user"` in hunk, so the agent can tell your review comments apart from its own notes. Note that `hunk session comment list --type user` still filters by hunk's own `source` field, which `session comment apply` cannot set — such comments stay `--type agent` there.
+
 ## [0.4.0]
 
 - Adding a comment starts the hunk session in the background if it isn't running yet.

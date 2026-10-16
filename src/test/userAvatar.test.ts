@@ -66,6 +66,21 @@ suite('createUserAvatarResolver', () => {
 		assert.strictEqual(resolver.uri(), undefined);
 	});
 
+	test('prefers the GitHub account signed in to VS Code over the git email', async () => {
+		const resolver = createUserAvatarResolver(
+			async () => '99+fromemail@users.noreply.github.com',
+			async () => 'signedin',
+		);
+		await resolver.refresh();
+		assert.strictEqual(resolver.uri()?.toString(), 'https://github.com/signedin.png');
+	});
+
+	test('uses the signed-in GitHub account when the email is a regular address', async () => {
+		const resolver = createUserAvatarResolver(async () => 'someone@example.com', async () => 'octocat');
+		await resolver.refresh();
+		assert.strictEqual(resolver.uri()?.toString(), 'https://github.com/octocat.png');
+	});
+
 	test('stays undefined when there is no email at all', async () => {
 		const resolver = createUserAvatarResolver(async () => undefined);
 		await resolver.refresh();

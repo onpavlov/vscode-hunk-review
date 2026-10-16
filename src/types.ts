@@ -12,6 +12,8 @@ export interface StoredComment {
 	summary: string;
 	status: CommentStatus;
 	sessionCommentId?: string;
+	/** hunk note id this comment replies to; sent as `replyTo` instead of a line anchor */
+	replyTo?: string;
 	createdAt: string;
 }
 
@@ -25,11 +27,28 @@ export interface ArchivedComment extends StoredComment {
 export interface CommentArchiveData {
 	version: 1;
 	comments: ArchivedComment[];
+	/** absent in archives written before notes were persisted */
+	notes?: ArchivedNote[];
 }
 
 export interface CommentStoreData {
 	version: 1;
 	comments: StoredComment[];
+	/**
+	 * hunk notes (agent replies, TUI notes) cached from the live session, so they outlive it.
+	 * Optional on disk: files written before 0.5.0 have no `notes` and load as [].
+	 */
+	notes?: StoredNote[];
+}
+
+/** A hunk note persisted in comments.json, tagged with the session it was read from. */
+export interface StoredNote extends HunkNote {
+	sessionId?: string;
+}
+
+export interface ArchivedNote extends StoredNote {
+	archivedAt: string;
+	commit?: string;
 }
 
 export interface HunkSession {
