@@ -77,6 +77,12 @@ export interface HunkNote {
 	noteId: string;
 	parentId?: string;
 	source: string;
+	/**
+	 * Who wrote the note: 'user' for the human's own comments. Independent of `source`,
+	 * which only says through which channel hunk exposes the note (comments written by
+	 * the human through an agent API still carry `source: 'agent'`).
+	 */
+	author?: string;
 	filePath: string;
 	hunkIndex: number;
 	newRange: [number, number];

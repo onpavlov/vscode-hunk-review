@@ -32,6 +32,28 @@ function statusLabel(status: StoredComment['status']): string | undefined {
 	}
 }
 
+type NoteAuthorKind = 'user' | 'agent' | 'hunk';
+
+/**
+ * Who a hunk note belongs to. hunk's `source` says through which channel a note is
+ * exposed, not who wrote it: the user's own comments come back as `source: 'agent'`
+ * with `author: 'user'`, so `author` wins whenever it is present.
+ */
+function noteAuthor(note: HunkNote): {
+	kind: NoteAuthorKind;
+	author: string;
+	avatar: 'user' | 'agent';
+	label?: string;
+} {
+	if (note.author === 'user') {
+		return { kind: 'user', author: vscode.l10n.t('You'), avatar: 'user' };
+	}
+	if (note.source === 'agent') {
+		return { kind: 'agent', author: vscode.l10n.t('AI Agent'), avatar: 'agent' };
+	}
+	return { kind: 'hunk', author: 'hunk', avatar: 'agent', label: vscode.l10n.t('note') };
+}
+
 export interface ThreadCommentDescriptor {
 	author: string;
 	/** avatar shown next to the author name */
@@ -48,6 +70,8 @@ export interface ThreadCommentDescriptor {
 	contextValue?: 'pending' | 'stale';
 	/** hunk note id, set for notes from the session (agent replies, TUI notes) — what "Reply" answers */
 	noteId?: string;
+	/** whether the Reply button applies: agent notes yes, the user's own notes no */
+	canReply?: boolean;
 	/** id in hunk's reply tree: note id, or our comment's sessionCommentId (store id until sent) */
 	treeId?: string;
 	/** treeId of the comment this one answers (hunk `parentId` / our `replyTo`) */
@@ -134,15 +158,16 @@ export function buildThreadDescriptors(
 			continue;
 		}
 		const key = keyOf(file, 'new', line);
-		const isAgent = n.source === 'agent';
+		const who = noteAuthor(n);
 		const descriptor: ThreadCommentDescriptor = {
-			author: isAgent ? vscode.l10n.t('AI Agent') : 'hunk',
-			avatar: 'agent',
-			label: isAgent ? undefined : vscode.l10n.t('note'),
+			author: who.author,
+			avatar: who.avatar,
+			label: who.label,
 			body: n.body,
 			timestamp: new Date(n.createdAt),
 			readOnly: true,
 			noteId: n.noteId,
+			canReply: who.kind !== 'user',
 			treeId: n.noteId,
 			parentTreeId: n.parentId,
 		};
@@ -330,7 +355,7 @@ export class CommentBridge {
 					mode: vscode.CommentMode.Preview,
 					storeId: c.storeId,
 					noteId: c.noteId,
-					contextValue: c.noteId && repliesSupported ? 'note' : c.contextValue,
+					contextValue: c.canReply && repliesSupported ? 'note' : c.contextValue,
 				}),
 			);
 

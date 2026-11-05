@@ -74,6 +74,37 @@ suite('buildThreadDescriptors', () => {
 		assert.strictEqual(desc[0].collapsed, true);
 	});
 
+	test('a note written by the user shows as You, without a Reply button', () => {
+		const own: HunkNote = {
+			noteId: 'mcp:7',
+			source: 'agent',
+			author: 'user',
+			filePath: 'src/c.ts',
+			hunkIndex: 0,
+			newRange: [12, 12],
+			body: 'is Merged a real status?',
+			createdAt: '2026-09-10T00:00:03Z',
+			editable: false,
+		};
+		const answer: HunkNote = {
+			...own,
+			noteId: 'mcp:8',
+			parentId: 'mcp:7',
+			author: undefined,
+			body: 'no, it was a placeholder',
+			createdAt: '2026-09-10T00:00:04Z',
+		};
+		const desc = buildThreadDescriptors([], [own, answer]);
+		assert.strictEqual(desc.length, 1);
+		assert.deepStrictEqual(
+			desc[0].comments.map((c) => [c.author, c.avatar, c.label, c.canReply]),
+			[
+				['You', 'user', undefined, false],
+				['AI Agent', 'agent', '↳ reply to You', true],
+			],
+		);
+	});
+
 	test('pending and stale comments stay separate read-only rules', () => {
 		const desc = buildThreadDescriptors(
 			[

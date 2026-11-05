@@ -2,6 +2,10 @@
 
 All notable changes to the "hunk-review" extension will be documented in this file.
 
+## [0.5.2]
+
+- Show comments you wrote in hunk itself (TUI, MCP, CLI) as yours: they used to appear as "AI Agent" notes, because hunk reports them with `source: "agent"` and only the separate `author: "user"` field marks the human author. Agent replies to them are now labeled "↳ reply to You" instead of "↳ reply to AI Agent", and they no longer offer a Reply button. Notes cached by older extension versions carry no `author` and stay as "AI Agent" until a live session re-reads them.
+
 ## [0.5.1]
 
 - Make the diff easier to read: only added and removed lines are highlighted now, each with a green/red fill, a solid edge bar and an overview-ruler mark. The grey highlight that covered the whole hunk — context lines included — is gone, so the actual change no longer blends into the review region.

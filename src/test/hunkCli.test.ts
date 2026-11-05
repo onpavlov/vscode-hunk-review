@@ -68,6 +68,24 @@ suite('HunkCli', () => {
 		assert.deepStrictEqual(JSON.parse(capturedInput).comments[0], { replyTo: 'mcp:7', summary: 'done' });
 	});
 
+	test('listNotes keeps the author, so a human note is not mistaken for an agent one', async () => {
+		const stdout = JSON.stringify({
+			comments: [
+				{ noteId: 'mcp:0', source: 'agent', author: 'user', body: 'mine', newRange: [7, 7] },
+				{ noteId: 'mcp:1', source: 'agent', body: 'theirs', newRange: [7, 7] },
+			],
+		});
+		const cli = createHunkCli(async () => ({ stdout, stderr: '' }));
+		const notes = await cli.listNotes('/tmp/r');
+		assert.deepStrictEqual(
+			notes.map((n) => [n.noteId, n.author, n.body]),
+			[
+				['mcp:0', 'user', 'mine'],
+				['mcp:1', undefined, 'theirs'],
+			],
+		);
+	});
+
 	test('version runs "hunk --version" and trims the output', async () => {
 		const cli = createHunkCli(async (_file, args) => {
 			assert.deepStrictEqual(args, ['--version']);

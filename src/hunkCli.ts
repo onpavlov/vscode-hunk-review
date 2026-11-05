@@ -178,13 +178,14 @@ export class HunkCli {
 	}
 
 	// Field shapes of `comment list --json` drift between versions/sources:
-	// noteId|commentId, newRange|line, body|summary, source — optional.
+	// noteId|commentId, newRange|line, body|summary, source, author — optional.
 	private normalizeNote(c: Record<string, unknown>): HunkNote {
 		const line = (c['line'] ?? 1) as number;
 		return {
 			noteId: (c['noteId'] ?? c['commentId'] ?? '') as string,
 			parentId: c['parentId'] as string | undefined,
 			source: (c['source'] ?? 'agent') as string,
+			author: c['author'] as string | undefined,
 			filePath: (c['filePath'] ?? '') as string,
 			hunkIndex: (c['hunkIndex'] ?? 0) as number,
 			newRange: (c['newRange'] ?? [line, line]) as [number, number],
