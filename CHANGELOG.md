@@ -2,6 +2,11 @@
 
 All notable changes to the "hunk-review" extension will be documented in this file.
 
+## [0.5.1]
+
+- Make the diff easier to read: only added and removed lines are highlighted now, each with a green/red fill, a solid edge bar and an overview-ruler mark. The grey highlight that covered the whole hunk — context lines included — is gone, so the actual change no longer blends into the review region.
+- Highlight fills are picked for dark and light themes; high-contrast themes keep the diff editor's own colors.
+
 ## [0.5.0]
 
 - Reply to agent notes from VS Code: a Reply button on each agent note opens an editor for the answer, which is sent as a threaded `replyTo` reply to that note. Needs hunk 0.22+ (detected via `hunk --version`); if the parent note is gone by send time, the reply goes out as a regular comment on the same line.

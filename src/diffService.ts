@@ -10,6 +10,17 @@ export interface LineRange {
 export interface ChangedLines {
 	newLines: Map<string, LineRange[]>;
 	oldLines: Map<string, LineRange[]>;
+	/**
+	 * Lines git actually added or removed, without the hunk's context lines. Optional because
+	 * callers that only reconcile ranges (e.g. from `session review`) do not have it.
+	 */
+	highlights?: DiffHighlights;
+}
+
+/** Which single lines were added (new side) or removed (old side); hunk context excluded. */
+export interface DiffHighlights {
+	added: Map<string, number[]>;
+	removed: Map<string, number[]>;
 }
 
 export interface GitRepositoryLike {
@@ -81,15 +92,21 @@ export class DiffService {
 		}
 	}
 
-	static parseDiffLines(diffText: string): ChangedLines {
+	static parseDiffLines(diffText: string): ChangedLines & { highlights: DiffHighlights } {
 		const newLines = new Map<string, LineRange[]>();
 		const oldLines = new Map<string, LineRange[]>();
+		const highlights: DiffHighlights = { added: new Map(), removed: new Map() };
 		let currentFile = '';
+		// Counters into the hunk body: where the next context/added/removed line sits on each side.
+		let oldLine = 0;
+		let newLine = 0;
+		let inHunk = false;
 		const hunkRe = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 		for (const line of diffText.split('\n')) {
 			const diffLine = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
 			if (diffLine) {
 				currentFile = diffLine[2];
+				inHunk = false;
 				continue;
 			}
 			const m = hunkRe.exec(line);
@@ -104,9 +121,27 @@ export class DiffService {
 				const oldRanges = oldLines.get(currentFile) ?? [];
 				oldRanges.push({ start: oldStart, end: oldStart + oldCount - 1 });
 				oldLines.set(currentFile, oldRanges);
+				oldLine = oldStart;
+				newLine = newStart;
+				inHunk = true;
+				continue;
+			}
+			if (!inHunk) {
+				continue;
+			}
+			// Hunk body lines are prefixed with ' ', '+' or '-' ('\\' marks a missing trailing newline).
+			if (line.startsWith('+')) {
+				appendLine(highlights.added, currentFile, newLine);
+				newLine += 1;
+			} else if (line.startsWith('-')) {
+				appendLine(highlights.removed, currentFile, oldLine);
+				oldLine += 1;
+			} else if (line.startsWith(' ')) {
+				oldLine += 1;
+				newLine += 1;
 			}
 		}
-		return { newLines, oldLines };
+		return { newLines, oldLines, highlights };
 	}
 
 	async getChangedLines(): Promise<ChangedLines> {
@@ -116,23 +151,24 @@ export class DiffService {
 		}
 		const worktree = await repo.diff();
 		const staged = await repo.diff(true);
-		const { newLines, oldLines } = DiffService.parseDiffLines(`${worktree}\n${staged}`);
+		const { newLines, oldLines, highlights } = DiffService.parseDiffLines(`${worktree}\n${staged}`);
 		// `git diff` never lists untracked files, so comments anchored there would
 		// have no changed-line range and go stale immediately; treat the whole
 		// file as changed for anything git status flags but git diff is silent on.
-		await this.addUntrackedFiles(repo, newLines);
+		await this.addUntrackedFiles(repo, newLines, highlights);
 		for (const [file, ranges] of newLines) {
 			newLines.set(file, mergeRanges(ranges));
 		}
 		for (const [file, ranges] of oldLines) {
 			oldLines.set(file, mergeRanges(ranges));
 		}
-		return { newLines, oldLines };
+		return { newLines, oldLines, highlights };
 	}
 
 	private async addUntrackedFiles(
 		repo: GitRepositoryLike,
 		newLines: Map<string, LineRange[]>,
+		highlights: DiffHighlights,
 	): Promise<void> {
 		for (const { uri } of [...repo.state.workingTreeChanges, ...(repo.state.untrackedChanges ?? [])]) {
 			const file = path.relative(repo.rootUri.fsPath, uri.fsPath).split(path.sep).join('/');
@@ -143,6 +179,11 @@ export class DiffService {
 				const bytes = await vscode.workspace.fs.readFile(uri);
 				const lineCount = Buffer.from(bytes).toString('utf8').split('\n').length;
 				newLines.set(file, [{ start: 1, end: lineCount }]);
+				// Every line of a new file is an addition on the new side.
+				highlights.added.set(
+					file,
+					Array.from({ length: lineCount }, (_, i) => i + 1),
+				);
 			} catch {
 				// file vanished since the status snapshot (renamed/deleted mid-poll) — skip it
 			}
@@ -178,6 +219,19 @@ export class DiffService {
 			modifiedUri,
 			`hunk review: ${path.basename(modifiedUri.fsPath)}`,
 		);
+	}
+}
+
+/** Collects a line number per file, de-duplicated: the same file appears in both the
+ * staged and the working-tree diff, so a line can be listed twice. */
+function appendLine(target: Map<string, number[]>, file: string, line: number): void {
+	const lines = target.get(file);
+	if (!lines) {
+		target.set(file, [line]);
+		return;
+	}
+	if (lines.at(-1) !== line) {
+		lines.push(line);
 	}
 }
 

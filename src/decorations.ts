@@ -11,17 +11,35 @@ export function expandRanges(ranges: LineRange[]): number[] {
 	});
 }
 
+/** Fill and bar colors for one side of the diff. */
+interface SideColors {
+	fill: string;
+	bar: string;
+}
+
+/**
+ * Fills used on dark and light themes: the diff editor's own line backgrounds are too pale
+ * to tell a change from its context. High-contrast themes keep the theme's diff colors,
+ * since overriding them could break their contrast guarantees.
+ */
+const VIVID_COLORS: Record<'dark' | 'light', Record<'added' | 'removed', SideColors>> = {
+	dark: {
+		added: { fill: 'rgba(63, 185, 80, 0.28)', bar: 'rgba(63, 185, 80, 0.9)' },
+		removed: { fill: 'rgba(248, 81, 73, 0.28)', bar: 'rgba(248, 81, 73, 0.9)' },
+	},
+	light: {
+		added: { fill: 'rgba(34, 134, 58, 0.2)', bar: 'rgba(34, 134, 58, 0.85)' },
+		removed: { fill: 'rgba(207, 34, 46, 0.18)', bar: 'rgba(207, 34, 46, 0.85)' },
+	},
+};
+
 export function createDecorations(): {
 	update(changedLines: ChangedLines): void;
 	dispose(): void;
 } {
-	const reviewed = vscode.window.createTextEditorDecorationType({
-		backgroundColor: new vscode.ThemeColor('editor.wordHighlightBackground'),
-		overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.commentAggregation'),
-		isWholeLine: true,
-	});
-
 	let last: ChangedLines | undefined;
+	let types = createTypes();
+
 	const apply = () => {
 		if (!last) {
 			return;
@@ -29,24 +47,36 @@ export function createDecorations(): {
 		for (const editor of vscode.window.visibleTextEditors) {
 			const uri = editor.document.uri;
 			// Only diff editors are decorated: in a plain editor the whole-line
-			// background reads as an unexplained grey block over the code.
+			// backgrounds read as unexplained color blocks over the code.
 			if (!isShownInDiff(editor)) {
-				editor.setDecorations(reviewed, []);
+				editor.setDecorations(types.added, []);
+				editor.setDecorations(types.removed, []);
 				continue;
 			}
 			const file = relPath(uri);
 			// git-scheme = original (HEAD) side of a diff editor, where deleted lines live.
 			const isOriginalSide = uri.scheme === 'git';
 			const ranges = (isOriginalSide ? last.oldLines : last.newLines).get(file) ?? [];
-			editor.setDecorations(
-				reviewed,
-				expandRanges(ranges).map((line) => new vscode.Range(line - 1, 0, line - 1, 0)),
-			);
+			const highlights = last.highlights;
+			// Added/removed lines only: hunk context stays undecorated, otherwise its grey
+			// fill blends with the change highlight and the whole hunk reads as one block.
+			const changed = highlights
+				? (isOriginalSide ? highlights.removed : highlights.added).get(file) ?? []
+				: expandRanges(ranges);
+			editor.setDecorations(types.added, isOriginalSide ? [] : toRanges(changed));
+			editor.setDecorations(types.removed, isOriginalSide ? toRanges(changed) : []);
 		}
 	};
 	// Decorations belong to an editor instance: re-apply when editors are (re)shown,
 	// otherwise they vanish on a tab switch and only come back on the next refresh.
 	const onVisible = vscode.window.onDidChangeVisibleTextEditors(apply);
+	// Colors are picked for the theme kind, so a theme switch has to rebuild the types.
+	const onTheme = vscode.window.onDidChangeActiveColorTheme(() => {
+		types.added.dispose();
+		types.removed.dispose();
+		types = createTypes();
+		apply();
+	});
 
 	return {
 		update(changedLines) {
@@ -55,9 +85,61 @@ export function createDecorations(): {
 		},
 		dispose() {
 			onVisible.dispose();
-			reviewed.dispose();
+			onTheme.dispose();
+			types.added.dispose();
+			types.removed.dispose();
 		},
 	};
+}
+
+function createTypes(): {
+	added: vscode.TextEditorDecorationType;
+	removed: vscode.TextEditorDecorationType;
+} {
+	const vivid = vividPalette();
+	return {
+		added: createType(vivid?.added, {
+			background: new vscode.ThemeColor('diffEditor.insertedTextBackground'),
+			bar: new vscode.ThemeColor('editorGutter.addedBackground'),
+			ruler: new vscode.ThemeColor('editorOverviewRuler.addedForeground'),
+		}),
+		removed: createType(vivid?.removed, {
+			background: new vscode.ThemeColor('diffEditor.removedTextBackground'),
+			bar: new vscode.ThemeColor('editorGutter.deletedBackground'),
+			ruler: new vscode.ThemeColor('editorOverviewRuler.deletedForeground'),
+		}),
+	};
+}
+
+/** Vivid fills when the theme has them, otherwise the theme's own diff colors. */
+function createType(
+	vivid: SideColors | undefined,
+	theme: { background: vscode.ThemeColor; bar: vscode.ThemeColor; ruler: vscode.ThemeColor },
+): vscode.TextEditorDecorationType {
+	return vscode.window.createTextEditorDecorationType({
+		backgroundColor: vivid?.fill ?? theme.background,
+		borderColor: vivid?.bar ?? theme.bar,
+		borderStyle: 'solid',
+		borderWidth: '0 0 0 3px',
+		overviewRulerColor: theme.ruler,
+		isWholeLine: true,
+	});
+}
+
+/** Palette for the current theme kind, or undefined for themes that keep their own diff colors. */
+function vividPalette(): Record<'added' | 'removed', SideColors> | undefined {
+	const kind = vscode.window.activeColorTheme.kind;
+	if (kind === vscode.ColorThemeKind.Dark) {
+		return VIVID_COLORS.dark;
+	}
+	if (kind === vscode.ColorThemeKind.Light) {
+		return VIVID_COLORS.light;
+	}
+	return undefined;
+}
+
+function toRanges(lines: number[]): vscode.Range[] {
+	return lines.map((line) => new vscode.Range(line - 1, 0, line - 1, 0));
 }
 
 /** Whether this editor is a side of a diff tab (not a plain tab with the same file open). */

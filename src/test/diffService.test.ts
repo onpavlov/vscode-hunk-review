@@ -63,6 +63,38 @@ suite('DiffService.parseDiffLines', () => {
 		assert.deepStrictEqual(oldLines.get(''), [{ start: 5, end: 6 }]);
 		assert.deepStrictEqual(newLines.get(''), [{ start: 4, end: 3 }]); // +4,0 → empty range
 	});
+
+	test('collects added and removed lines without hunk context', () => {
+		const diff = [
+			'diff --git a/src/a.ts b/src/a.ts',
+			'--- a/src/a.ts',
+			'+++ b/src/a.ts',
+			'@@ -10,3 +10,4 @@ function a() {',
+			' context 10',
+			'-gone 11',
+			'+added 11',
+			'+added 12',
+			' context 13',
+			'\\ No newline at end of file',
+		].join('\n');
+		const { highlights } = DiffService.parseDiffLines(diff);
+		assert.deepStrictEqual(highlights.added.get('src/a.ts'), [11, 12]);
+		assert.deepStrictEqual(highlights.removed.get('src/a.ts'), [11]);
+	});
+
+	test('ignores file headers when collecting changed lines', () => {
+		const diff = [
+			'diff --git a/src/a.ts b/src/a.ts',
+			'--- a/src/a.ts',
+			'+++ b/src/a.ts',
+			'@@ -1 +1 @@',
+			'-old',
+			'+new',
+		].join('\n');
+		const { highlights } = DiffService.parseDiffLines(diff);
+		assert.deepStrictEqual(highlights.added.get('src/a.ts'), [1]);
+		assert.deepStrictEqual(highlights.removed.get('src/a.ts'), [1]);
+	});
 });
 
 suite('DiffService.getChangedLines (new files)', () => {
