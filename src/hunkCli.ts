@@ -202,7 +202,9 @@ export class HunkCli {
 
 	// `session review --json` returns hunk ranges; normalize both possible shapes.
 	private normalizeReview(raw: Record<string, unknown>): HunkReviewResult {
-		const files = (raw['files'] ?? []) as Array<{
+		// Newer builds wrap the payload in `review`; older ones return it at the top level.
+		const review = (raw['review'] ?? raw) as Record<string, unknown>;
+		const files = (review['files'] ?? []) as Array<{
 			path?: string;
 			filePath?: string;
 			hunks?: Array<Record<string, number>>;

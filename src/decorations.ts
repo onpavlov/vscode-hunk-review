@@ -33,7 +33,10 @@ const VIVID_COLORS: Record<'dark' | 'light', Record<'added' | 'removed', SideCol
 	},
 };
 
-export function createDecorations(): {
+export function createDecorations(
+	/** Which side of a diff editor a document belongs to; `git:` documents are original by default. */
+	diffSideOf: (uri: vscode.Uri) => 'old' | 'new' = (uri) => (uri.scheme === 'git' ? 'old' : 'new'),
+): {
 	update(changedLines: ChangedLines): void;
 	dispose(): void;
 } {
@@ -54,8 +57,10 @@ export function createDecorations(): {
 				continue;
 			}
 			const file = relPath(uri);
-			// git-scheme = original (HEAD) side of a diff editor, where deleted lines live.
-			const isOriginalSide = uri.scheme === 'git';
+			// Only the original side holds the deleted lines. A staged change is diffed against
+			// the index, which VS Code also serves over the `git:` scheme — so ask the diff
+			// rather than the scheme which side this editor is.
+			const isOriginalSide = diffSideOf(uri) === 'old';
 			const ranges = (isOriginalSide ? last.oldLines : last.newLines).get(file) ?? [];
 			const highlights = last.highlights;
 			// Added/removed lines only: hunk context stays undecorated, otherwise its grey

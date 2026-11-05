@@ -117,7 +117,7 @@ suite('DiffService.getChangedLines (new files)', () => {
 		return new DiffService(() => ({ repositories: [full], toGitUri: (u) => u }));
 	}
 
-	test('a staged new file is changed as a whole', async () => {
+	test('a staged new file is not part of the review surface', async () => {
 		const staged = [
 			'diff --git a/new.ts b/new.ts',
 			'new file mode 100644',
@@ -127,7 +127,33 @@ suite('DiffService.getChangedLines (new files)', () => {
 		].join('\n');
 		const svc = service({ diff: async (cached) => (cached ? staged : '') });
 		const { newLines } = await svc.getChangedLines();
-		assert.deepStrictEqual(newLines.get('new.ts'), [{ start: 1, end: 3 }]);
+		// Staged-only changes are not commentable: `hunk diff` does not hold them, so a comment
+		// there could never be sent.
+		assert.deepStrictEqual(newLines.size, 0);
+	});
+
+	test('a staged modification is left out while unstaged ones stay', async () => {
+		const unstaged = [
+			'diff --git a/b.ts b/b.ts',
+			'--- a/b.ts',
+			'+++ b/b.ts',
+			'@@ -1,1 +1,2 @@',
+			' keep',
+			'+added',
+		].join('\n');
+		const staged = [
+			'diff --git a/a.ts b/a.ts',
+			'--- a/a.ts',
+			'+++ b/a.ts',
+			'@@ -5,1 +5,2 @@',
+			' keep',
+			'+staged line',
+		].join('\n');
+		const svc = service({ diff: async (cached) => (cached ? staged : unstaged) });
+		const { newLines, highlights } = await svc.getChangedLines();
+		assert.deepStrictEqual([...newLines.keys()], ['b.ts']);
+		assert.deepStrictEqual(highlights?.added.get('b.ts'), [2]);
+		assert.strictEqual(highlights?.added.has('a.ts'), false);
 	});
 
 	test('an untracked file listed separately (git.untrackedChanges: separate) is changed as a whole', async () => {
@@ -170,5 +196,68 @@ suite('DiffService.getUserEmail', () => {
 		const api: GitApiLike = { repositories: [repo], toGitUri: (u) => u };
 		const service = new DiffService(() => api);
 		assert.strictEqual(await service.getUserEmail(), undefined);
+	});
+});
+
+suite('DiffService diff sides', () => {
+	async function closeActiveEditor(): Promise<void> {
+		await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+	}
+
+	function tempUri(name: string): vscode.Uri {
+		return vscode.Uri.file(path.join(os.tmpdir(), `hunk-review-${name}.ts`));
+	}
+
+	async function writeTemp(uri: vscode.Uri, text: string): Promise<void> {
+		await vscode.workspace.fs.writeFile(uri, Buffer.from(text));
+	}
+
+	test('falls back to the scheme when no diff editor shows the document', () => {
+		const service = new DiffService(() => undefined);
+		assert.strictEqual(service.diffSideOf(vscode.Uri.file('/repo/src/a.ts')), 'new');
+		// A `git:` document that isn't a side of an open diff is a committed revision.
+		assert.strictEqual(
+			service.diffSideOf(vscode.Uri.file('/repo/src/a.ts').with({ scheme: 'git', query: '{"ref":"HEAD"}' })),
+			'old',
+		);
+	});
+
+	test('tells the two sides of an open diff apart by document uri', async () => {
+		const original = tempUri('side-old');
+		const modified = tempUri('side-new');
+		await writeTemp(original, 'a\n');
+		await writeTemp(modified, 'b\n');
+		const service = new DiffService(() => undefined);
+		await vscode.commands.executeCommand('vscode.diff', original, modified, 'hunk-review sides');
+		try {
+			assert.strictEqual(service.diffSideOf(original), 'old');
+			assert.strictEqual(service.diffSideOf(modified), 'new');
+		} finally {
+			await closeActiveEditor();
+		}
+	});
+
+	test('resolves the document the open diff shows as the new side', async () => {
+		const original = tempUri('head');
+		const index = tempUri('index');
+		const workingTree = tempUri('worktree');
+		await writeTemp(original, 'a\n');
+		await writeTemp(index, 'b\n');
+		// The git extension serves the index of a staged change over the `git:` scheme, so the
+		// document holding the new side of that diff is not the working tree file.
+		const service = new DiffService(() => ({ repositories: [], toGitUri: () => original }));
+		await vscode.commands.executeCommand('vscode.diff', original, index, 'hunk-review staged');
+		try {
+			assert.strictEqual(service.getModifiedUri(workingTree).toString(), index.toString());
+			assert.strictEqual(service.diffSideOf(index), 'new');
+		} finally {
+			await closeActiveEditor();
+		}
+	});
+
+	test('keeps the working tree file when no diff of it against HEAD is open', () => {
+		const service = new DiffService(() => ({ repositories: [], toGitUri: () => tempUri('somewhere-else') }));
+		const workingTree = tempUri('unopened');
+		assert.strictEqual(service.getModifiedUri(workingTree).toString(), workingTree.toString());
 	});
 });

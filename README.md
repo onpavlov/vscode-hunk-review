@@ -5,8 +5,12 @@ where a coding agent can read them.
 
 ## What the extension does
 
-- Opens a review of uncommitted changes (working tree + staging) in native
-  VS Code diff editors; changed lines are highlighted.
+- Opens a review of uncommitted **working tree** changes (unstaged edits and
+  untracked files) in native VS Code diff editors; changed lines are
+  highlighted. Staged changes are not part of the review — `hunk diff` does not
+  load them, so a comment there could never be sent: such lines are not
+  commentable, and a comment whose change gets staged is marked stale with a
+  warning that it will not be sent.
 - Lets you comment on changed lines: click "+" → type text in the thread
   editor → press the "Add Comment" button. This works on both
   sides of the diff editor — added/context lines on the new (right) side and

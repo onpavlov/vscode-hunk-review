@@ -110,15 +110,33 @@ suite('HunkCli', () => {
 		assert.strictEqual(isHunkTooOldForReplies(undefined), false);
 	});
 
-	test('reload swaps session contents with "-- diff" tail', async () => {
-		let capturedArgs: string[] = [];
+	test('reload swaps session contents with the working tree signal, not a ref', async () => {
+		const captured: string[][] = [];
 		const runner: HunkRunner = async (_file, args) => {
-			capturedArgs = args;
+			captured.push(args);
 			return { stdout: 'Reloaded repo /tmp/r (1 files).', stderr: '' };
 		};
 		const cli = createHunkCli(runner);
 		await cli.reload('/tmp/r');
-		assert.deepStrictEqual(capturedArgs, ['session', 'reload', '--repo', '/tmp/r', '--', 'diff']);
+		// `diff` without a ref: the review covers the working tree only, so staged changes never
+		// enter the session (comments on them are refused before sending).
+		assert.deepStrictEqual(captured, [['session', 'reload', '--repo', '/tmp/r', '--', 'diff']]);
+	});
+
+	test('sessionReview reads the files out of a payload wrapped in "review"', async () => {
+		const stdout = JSON.stringify({
+			review: {
+				files: [
+					{ path: 'a.go', hunks: [{ newStart: 3, newLines: 2 }] },
+					{ path: 'b.go', hunks: [] },
+				],
+			},
+		});
+		const runner: HunkRunner = async () => ({ stdout, stderr: '' });
+		const cli = createHunkCli(runner);
+		const review = await cli.sessionReview('/tmp/r');
+		assert.deepStrictEqual(review.files.map((f) => f.path), ['a.go', 'b.go']);
+		assert.deepStrictEqual(review.files[0].hunks, [{ newStart: 3, newLines: 2 }]);
 	});
 
 	test('non-zero exit raises HunkCommandError with stderr', async () => {

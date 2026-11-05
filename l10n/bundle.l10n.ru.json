@@ -3,7 +3,9 @@
 	"hunk session is not running (click for menu)": "hunk-сессия не запущена (клик — меню)",
 	"Found several hunk sessions in this repository — using the first one.": "Найдено несколько hunk-сессий этого репозитория — используем первую.",
 	"Comment sync error: expected {0} applied, got {1}. Statuses not updated.": "Ошибка синхронизации комментариев: ожидалось {0} применённых, получено {1}. Статусы не обновлены.",
-	"Sent {0} comment(s). hunk session is running in the background.": "Отправлено комментариев: {0}. hunk-сессия работает в фоне.",
+		"{0} comment(s) will not be sent: their lines are not in the hunk session’s diff.": "Не будут отправлены комментарии ({0}): их строк нет в диффе hunk-сессии.",
+	"{0} comment(s) will not be sent: their lines left the working tree diff (staged or reverted).": "Не будут отправлены комментарии ({0}): их строки больше не входят в дифф рабочего каталога (застейджены или отменены).",
+"Sent {0} comment(s). hunk session is running in the background.": "Отправлено комментариев: {0}. hunk-сессия работает в фоне.",
 	"Failed to send comments: {0}": "Не удалось отправить комментарии: {0}",
 	"Failed to start hunk session: {0}": "Не удалось запустить сессию hunk: {0}",
 	"Git repository not found": "Git-репозиторий не найден",
@@ -39,7 +41,7 @@
 	"Open install docs": "Открыть инструкцию по установке",
 	"The hunk CLI was not found in PATH. Comments are saved locally, but sending them to an agent needs hunk. Install it with \"{0}\" (or via Homebrew / the install script), then reload the window.": "hunk CLI не найден в PATH. Комментарии сохраняются локально, но для отправки агенту нужен hunk. Установите его командой «{0}» (или через Homebrew / установочный скрипт) и перезагрузите окно.",
 	"Archived {0} comment(s) after the commit.": "После коммита перенесено в архив комментариев: {0}.",
-	"Comments can only be added to changed lines.": "Комментарии можно оставлять только на изменённых строках.",
+	"Comments can only be added to lines changed in the working tree — staged changes are not part of the review.": "Комментарии можно оставлять только на строках, изменённых в рабочем каталоге, — застейдженные изменения в ревью не входят.",
 	"↳ reply to {0}": "↳ ответ на {0}",
 	"hunk {0} is older than {1}: replying to agent notes is unavailable. Update hunk, then reload the window.": "hunk {0} старше {1}: отвечать на заметки агента нельзя. Обновите hunk и перезагрузите окно."
 }

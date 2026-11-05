@@ -274,6 +274,13 @@ export class CommentBridge {
 		private readonly resolveUserAvatarUri: () => vscode.Uri | undefined = () => undefined,
 		/** Whether the installed hunk accepts `replyTo` (0.22+); gates the Reply button on notes. */
 		private readonly repliesSupported: () => boolean = () => false,
+		/**
+		 * URI of the document an open diff editor shows as the new side of a file — the working
+		 * tree file, or the index when the diff is a staged change opened from the SCM view.
+		 */
+		private readonly modifiedUri?: (file: string) => vscode.Uri,
+		/** Which side of a diff editor a document belongs to; `git:` documents are original by default. */
+		private readonly diffSideOf?: (uri: vscode.Uri) => 'old' | 'new',
 	) {}
 
 	/** Anchor of a thread this bridge manages; undefined for a draft ("Start discussion") thread. */
@@ -301,14 +308,18 @@ export class CommentBridge {
 		// A file with no entry in the diff map gets none: hunk only knows files in the
 		// diff, so a comment there could never be sent. New files (staged or untracked)
 		// are in the map as whole-file ranges, so they stay commentable.
-		// The diff editor's original (HEAD) document — `git:`-scheme — carries
-		// the deleted lines, so it needs the old-side ranges, not the new-side ones.
+		// The diff editor's original (HEAD) document — `git:`-scheme — carries the deleted
+		// lines, so it needs the old-side ranges, not the new-side ones. Being `git:`-scheme
+		// alone doesn't make a document the original side, though: a staged change is diffed
+		// against the index, which VS Code serves over the same scheme.
 		this.controller.commentingRangeProvider = {
 			provideCommentingRanges: async (document) => {
 				const changedLines = await this.getChangedLines();
 				const rel = relPath(document.uri);
-				const isOriginalSide = document.uri.scheme === 'git';
-				const ranges = (isOriginalSide ? changedLines.oldLines : changedLines.newLines).get(rel) ?? [];
+				const side =
+					this.diffSideOf?.(document.uri) ??
+					(document.uri.scheme === 'git' ? 'old' : 'new');
+				const ranges = (side === 'old' ? changedLines.oldLines : changedLines.newLines).get(rel) ?? [];
 				return ranges.map((r) => new vscode.Range(r.start - 1, 0, r.end - 1, Number.MAX_SAFE_INTEGER));
 			},
 		};
@@ -340,7 +351,7 @@ export class CommentBridge {
 			const uri =
 				d.side === 'old'
 					? this.originalUri(d.file)
-					: vscode.Uri.joinPath(workspaceRoot(), d.file);
+					: (this.modifiedUri?.(d.file) ?? vscode.Uri.joinPath(workspaceRoot(), d.file));
 			const range = new vscode.Range(d.start - 1, 0, d.end - 1, Number.MAX_SAFE_INTEGER);
 			const comments = d.comments.map(
 				(c): HunkComment => ({
@@ -359,6 +370,15 @@ export class CommentBridge {
 				}),
 			);
 
+			const stale = this.threadByKey.get(d.threadKey);
+			if (stale && stale.uri.toString() !== uri.toString()) {
+				// The document a thread anchors to depends on the open diff editor, which can
+				// change (the same file reviewed against the working tree in one tab and against
+				// the index in another). A thread can't be re-anchored to another document, so it
+				// is recreated and loses its manual expand/collapse state.
+				stale.dispose();
+				this.threadByKey.delete(d.threadKey);
+			}
 			const existing = this.threadByKey.get(d.threadKey);
 			if (existing) {
 				// Update the same thread object in place. Disposing and recreating it

@@ -13,7 +13,9 @@ export const vscodeTerminalFactory: TerminalFactory = (cwd, onDispose) => {
 	const terminal = vscode.window.createTerminal({
 		name: 'hunk review session',
 		cwd,
-		// Hide the terminal so launching hunk diff doesn't steal focus from the editor.
+		// Hidden so launching hunk diff adds no terminal tab and steals no focus. VS Code does
+		// not revive a hidden terminal across a window reload, so a reload ends the session
+		// (the orphaned pty is killed a minute later).
 		hideFromUser: true,
 		// Run the TUI as the terminal's process; without this an empty shell opens
 		// and hunk never starts.

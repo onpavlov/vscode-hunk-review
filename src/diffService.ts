@@ -149,9 +149,11 @@ export class DiffService {
 		if (!repo) {
 			return { newLines: new Map(), oldLines: new Map() };
 		}
+		// Unstaged changes only. The index is deliberately left out: the review surface mirrors
+		// what `hunk diff` loads, and hunk refuses comments on anything it doesn't hold — so a
+		// staged-only line must not be commentable here either.
 		const worktree = await repo.diff();
-		const staged = await repo.diff(true);
-		const { newLines, oldLines, highlights } = DiffService.parseDiffLines(`${worktree}\n${staged}`);
+		const { newLines, oldLines, highlights } = DiffService.parseDiffLines(worktree);
 		// `git diff` never lists untracked files, so comments anchored there would
 		// have no changed-line range and go stale immediately; treat the whole
 		// file as changed for anything git status flags but git diff is silent on.
@@ -211,6 +213,47 @@ export class DiffService {
 		return api.toGitUri(modifiedUri, 'HEAD');
 	}
 
+	/**
+	 * Which side of a diff editor a document belongs to. The scheme alone doesn't say: for a
+	 * staged change VS Code diffs HEAD against the *index* and serves both over the `git:`
+	 * scheme, so `git:` is the original side in one diff and the modified side in another.
+	 */
+	diffSideOf(uri: vscode.Uri): 'old' | 'new' {
+		const target = uri.toString();
+		for (const diff of openDiffs()) {
+			if (diff.modified.toString() === target) {
+				return 'new';
+			}
+			if (diff.original.toString() === target) {
+				return 'old';
+			}
+		}
+		// Not a side of an open diff: a `git:` document is a committed revision, and comments
+		// there can only target the deleted lines hunk anchors to.
+		return uri.scheme === 'git' ? 'old' : 'new';
+	}
+
+	/**
+	 * The document the open diff editor shows for the new side of `modifiedUri` — the working
+	 * tree file, unless that diff renders the new side from another document (the index of a
+	 * staged change). VS Code matches a comment thread to an editor by document uri, so an
+	 * anchor on the working tree file would be invisible in such a diff.
+	 */
+	getModifiedUri(modifiedUri: vscode.Uri): vscode.Uri {
+		let original: string;
+		try {
+			original = this.getOriginalUri(modifiedUri).toString();
+		} catch {
+			return modifiedUri; // no git extension — nothing to resolve against
+		}
+		for (const diff of openDiffs()) {
+			if (diff.original.toString() === original) {
+				return diff.modified;
+			}
+		}
+		return modifiedUri;
+	}
+
 	async openDiffForFile(modifiedUri: vscode.Uri): Promise<void> {
 		const originalUri = this.getOriginalUri(modifiedUri);
 		await vscode.commands.executeCommand(
@@ -220,6 +263,33 @@ export class DiffService {
 			`hunk review: ${path.basename(modifiedUri.fsPath)}`,
 		);
 	}
+}
+
+/** Both documents of a diff editor tab. */
+interface OpenDiff {
+	original: vscode.Uri;
+	modified: vscode.Uri;
+}
+
+/**
+ * Both sides of every open diff editor, the active tab's diff first: the same file can be
+ * diffed in several tabs (the review of HEAD against the working tree, the SCM view of a
+ * staged change), and the one the user is looking at should win.
+ */
+function openDiffs(): OpenDiff[] {
+	const groups = [...vscode.window.tabGroups.all].sort(
+		(a, b) => Number(b.isActive) - Number(a.isActive),
+	);
+	const diffs: OpenDiff[] = [];
+	for (const group of groups) {
+		const tabs = [...group.tabs].sort((a, b) => Number(b.isActive) - Number(a.isActive));
+		for (const tab of tabs) {
+			if (tab.input instanceof vscode.TabInputTextDiff) {
+				diffs.push({ original: tab.input.original, modified: tab.input.modified });
+			}
+		}
+	}
+	return diffs;
 }
 
 /** Collects a line number per file, de-duplicated: the same file appears in both the

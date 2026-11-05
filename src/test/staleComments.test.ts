@@ -186,3 +186,29 @@ suite('findOutOfDiffNoteIds', () => {
 		assert.deepStrictEqual(ids, ['out', 'gone']);
 	});
 });
+
+suite('staging a change takes its comments out of the review', () => {
+	function comment(id: string, filePath: string, line: number): StoredComment {
+		return {
+			id,
+			filePath,
+			target: { newLine: line },
+			summary: id,
+			status: 'pending',
+			createdAt: '2026-09-10T00:00:00Z',
+		};
+	}
+
+	test('a comment whose line was staged is stale, so it is not sent', () => {
+		// The index is not part of the review surface: after `git add` the line is no longer in
+		// the working tree diff, so the comment cannot be sent and is reported as stale.
+		const beforeStaging = { newLines: new Map([['a.go', [{ start: 10, end: 12 }]]]), oldLines: new Map<string, never[]>() };
+		const afterStaging = {
+			newLines: new Map([['b.go', [{ start: 1, end: 2 }]]]),
+			oldLines: new Map<string, never[]>(),
+		};
+		const commentOnA = comment('c1', 'a.go', 10);
+		assert.deepStrictEqual(findStaleCommentIds([commentOnA], beforeStaging), []);
+		assert.deepStrictEqual(findStaleCommentIds([commentOnA], afterStaging), ['c1']);
+	});
+});

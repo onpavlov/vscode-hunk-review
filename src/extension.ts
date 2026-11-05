@@ -10,6 +10,7 @@ import {
 	supportsReplies,
 } from './hunkCli.js';
 import type { ApplyCommentItem } from './hunkCli.js';
+import type { StoredComment } from './types.js';
 import { CommentStore, ensureGitignore } from './commentStore.js';
 import { DiffService } from './diffService.js';
 import { CommentBridge } from './commentBridge.js';
@@ -19,13 +20,13 @@ import { HunkSync } from './hunkSync.js';
 import { createDecorations } from './decorations.js';
 import { createDebouncer } from './debounce.js';
 import { formatStatusText } from './statusText.js';
-import {
-	findOutOfDiffCommentIds,
+import { findOutOfDiffCommentIds,
 	findOutOfDiffNoteIds,
 	findStaleCommentIds,
 	hunksToChangedLines,
 	isLineInDiff,
 } from './staleComments.js';
+import { applyWithFallback, splitDeliverable } from './sendPlan.js';
 import type { ChangedLines } from './diffService.js';
 import { createUserAvatarResolver, signedInGithubLogin } from './userAvatar.js';
 
@@ -63,11 +64,14 @@ export function activate(context: vscode.ExtensionContext): void {
 		(file) => diff.getOriginalUri(vscode.Uri.joinPath(vscode.Uri.file(root), file)),
 		() => userAvatar.uri(),
 		() => repliesSupported,
+		(file) =>
+			diff.getModifiedUri(vscode.Uri.joinPath(vscode.Uri.file(root), file)),
+		(uri) => diff.diffSideOf(uri),
 	);
 	const sessionManager = new SessionManager(cli, root, undefined, undefined, () =>
 		diff.isWorktreeClean(),
 	);
-	const decorations = createDecorations();
+	const decorations = createDecorations((uri) => diff.diffSideOf(uri));
 	context.subscriptions.push(decorations);
 
 	const refreshDecorations = async (changed?: ChangedLines) => {
@@ -179,6 +183,18 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 
+	// Files the live session actually holds. `comment apply` refuses anything else ("No diff file
+	// matches …") and rejects the whole batch with it, so they are split out before sending.
+	const filesInSession = async (): Promise<Set<string> | undefined> => {
+		try {
+			const review = await cli.sessionReview(root);
+			return new Set(review.files.map((f) => f.path));
+		} catch {
+			// Review unavailable (session just restarted): send everything and let hunk judge.
+			return undefined;
+		}
+	};
+
 	const sendComments = async () => {
 		const pending = await store.pending();
 		if (pending.length === 0) {
@@ -202,41 +218,65 @@ export function activate(context: vscode.ExtensionContext): void {
 				const liveNoteIds = pending.some((c) => c.replyTo) && repliesSupported
 					? new Set((await cli.listNotes(root)).map((n) => n.noteId))
 					: new Set<string>();
-				const result = await cli.applyComments(root, {
-					comments: pending.map((c): ApplyCommentItem =>
-						c.replyTo && liveNoteIds.has(c.replyTo)
-							? { replyTo: c.replyTo, summary: c.summary, author: REVIEW_AUTHOR }
-							: {
-								filePath: c.filePath,
-								newLine: c.target.newLine,
-								oldLine: c.target.oldLine,
-								summary: c.summary,
-								author: REVIEW_AUTHOR,
-							},
-					),
-				});
-				// Guard: applied count must match pending count before flipping statuses.
-				if (result.applied.length !== pending.length) {
-					void vscode.window.showErrorMessage(
-						vscode.l10n.t(
-							'Comment sync error: expected {0} applied, got {1}. Statuses not updated.',
-							pending.length,
-							result.applied.length,
-						),
-					);
-				} else {
-					// Correlate by filePath+line where possible; fall back to index.
-					for (let i = 0; i < pending.length; i += 1) {
-						await store.update(pending[i].id, {
+				const toItem = (c: StoredComment): ApplyCommentItem =>
+					c.replyTo && liveNoteIds.has(c.replyTo)
+						? { replyTo: c.replyTo, summary: c.summary, author: REVIEW_AUTHOR }
+						: {
+							filePath: c.filePath,
+							newLine: c.target.newLine,
+							oldLine: c.target.oldLine,
+							summary: c.summary,
+							author: REVIEW_AUTHOR,
+						};
+
+				// hunk rejects the whole batch over one anchor it can't place, so the comments it
+				// cannot hold are sorted out before sending instead of sinking the rest.
+				const { deliverable, skipped } = splitDeliverable(pending, await filesInSession());
+				for (const c of skipped) {
+					await store.update(c.id, { status: 'stale' });
+				}
+
+				// Applies one batch and flips the statuses; returns how many hunk accepted.
+				const applyBatch = async (items: StoredComment[]): Promise<number> => {
+					const result = await cli.applyComments(root, { comments: items.map(toItem) });
+					// Guard: the applied count must match the batch size before flipping statuses.
+					if (result.applied.length !== items.length) {
+						void vscode.window.showErrorMessage(
+							vscode.l10n.t(
+								'Comment sync error: expected {0} applied, got {1}. Statuses not updated.',
+								items.length,
+								result.applied.length,
+							),
+						);
+						return 0;
+					}
+					// The response is correlated back by array index.
+					for (let i = 0; i < items.length; i += 1) {
+						await store.update(items[i].id, {
 							status: 'sent',
 							sessionCommentId: result.applied[i]?.commentId,
 						});
 					}
+					return items.length;
+				};
+
+				const { sent, failed } = await applyWithFallback(deliverable, applyBatch);
+				for (const c of failed) {
+					await store.update(c.id, { status: 'stale' });
+				}
+				const notSent = skipped.length + failed.length;
+				if (notSent > 0) {
+					void vscode.window.showWarningMessage(
+						vscode.l10n.t(
+							'{0} comment(s) will not be sent: their lines are not in the hunk session\u2019s diff.',
+							notSent,
+						),
+					);
 				}
 				void vscode.window.showInformationMessage(
 					vscode.l10n.t(
 						'Sent {0} comment(s). hunk session is running in the background.',
-						result.applied.length,
+						sent,
 					),
 				);
 				await sync.pollOnce();
@@ -314,9 +354,21 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 
-	const markStaleComments = async (changed: ChangedLines) => {
-		for (const id of findStaleCommentIds(await store.pending(), changed)) {
+	// A comment whose line left the working tree diff can never be sent — most often because the
+	// change was staged (the index is not part of the review surface), or reverted. Say so instead
+	// of letting the comment sit in the store until someone presses Send and nothing happens.
+	const markStaleComments = async (changed: ChangedLines, notify = true) => {
+		const stale = findStaleCommentIds(await store.pending(), changed);
+		for (const id of stale) {
 			await store.update(id, { status: 'stale' });
+		}
+		if (notify && stale.length > 0) {
+			void vscode.window.showWarningMessage(
+				vscode.l10n.t(
+					'{0} comment(s) will not be sent: their lines left the working tree diff (staged or reverted).',
+					stale.length,
+				),
+			);
 		}
 	};
 
@@ -327,10 +379,14 @@ export function activate(context: vscode.ExtensionContext): void {
 		try {
 			// `session review` only reports new-side hunks — old-side staleness
 			// stays undetected here, caught later by the regular diff-based check.
-			await markStaleComments({
-				newLines: hunksToChangedLines(await cli.sessionReview(root)),
-				oldLines: new Map(),
-			});
+			// Sending reports its own "not sent" warning, so this pass stays quiet.
+			await markStaleComments(
+				{
+					newLines: hunksToChangedLines(await cli.sessionReview(root)),
+					oldLines: new Map(),
+				},
+				false,
+			);
 		} catch {
 			// stale diagnostics unavailable — not critical
 		}
@@ -339,21 +395,21 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	// Live update: saves and git operations lead to recomputing the diff,
 	// decorations, marking comments stale, and (if the session is live) reloading hunk's content.
-	// Skip an empty diff: reloading with no changes disconnects the session from the daemon
-	// (observed on 0.21.x); a clean tree is handled by auto-stop.
 	const onWorktreeChanged = async () => {
 		const changed = await diff.getChangedLines();
 		await refreshDecorations(changed);
 		await archiveAfterCommit(changed);
-		if (changed.newLines.size > 0) {
-			await markStaleComments(changed);
-			if (sessionManager.currentSession()) {
-				try {
-					await cli.reload(root);
-					await sync.pollOnce();
-				} catch {
-					// reload failure isn't critical — polling and the next send will still work
-				}
+		// Stale marking runs even for an empty diff: staging every change empties it, and that is
+		// exactly when the comments on those lines have to be reported as unsendable.
+		await markStaleComments(changed);
+		// Skip an empty diff for the reload: reloading with no changes disconnects the session
+		// from the daemon (observed on 0.21.x); a clean tree is handled by auto-stop.
+		if (changed.newLines.size > 0 && sessionManager.currentSession()) {
+			try {
+				await cli.reload(root);
+				await sync.pollOnce();
+			} catch {
+				// reload failure isn't critical — polling and the next send will still work
 			}
 		}
 		await hasPending();
@@ -515,13 +571,18 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 			const file = relPathFromRoot(thread.uri);
 			const line = ((thread.range?.start.line) ?? 0) + 1;
-			// git-scheme = original (HEAD) side of a diff editor — the target is a deleted line.
-			const target = thread.uri.scheme === 'git' ? { oldLine: line } : { newLine: line };
+			// The draft lives on one of the diff editor's two documents. Being `git:`-scheme
+			// doesn't make it the original side: a staged change diffs HEAD against the index,
+			// which VS Code serves over the same scheme.
+			const target =
+				diff.diffSideOf(thread.uri) === 'old' ? { oldLine: line } : { newLine: line };
 			// The commenting ranges may be outdated by now (a save/revert between opening
 			// the draft and submitting it): a line outside the diff could never be sent to hunk.
 			if (!isLineInDiff(file, target, await diff.getChangedLines())) {
 				void vscode.window.showWarningMessage(
-					vscode.l10n.t('Comments can only be added to changed lines.'),
+					vscode.l10n.t(
+						'Comments can only be added to lines changed in the working tree — staged changes are not part of the review.',
+					),
 				);
 				thread.dispose();
 				return;

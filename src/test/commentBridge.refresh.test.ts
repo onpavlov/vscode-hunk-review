@@ -125,3 +125,71 @@ suite('CommentBridge avatar resolution', () => {
 		}
 	});
 });
+
+suite('CommentBridge thread anchors', () => {
+	// Where the new side lives can change between refreshes: the same file is reviewed against
+	// the working tree in one tab and against the index of a staged change in another, and a
+	// thread cannot be re-anchored to a different document once created.
+	function storedOnNewLine(): CommentStore {
+		return {
+			load: async () => ({
+				version: 1 as const,
+				comments: [
+					{
+						id: 'c1',
+						filePath: 'src/a.ts',
+						target: { newLine: 5 },
+						summary: 'hi',
+						status: 'pending',
+						createdAt: '2026-09-10T00:00:00Z',
+					},
+				],
+			}),
+		} as unknown as CommentStore;
+	}
+
+	function bridgeAnchoringAt(uri: () => vscode.Uri): CommentBridge {
+		return new CommentBridge(
+			storedOnNewLine(),
+			async () => [],
+			emptyChangedLines,
+			fakeOriginalUri,
+			() => undefined,
+			() => false,
+			uri,
+		);
+	}
+
+	function threadOf(bridge: CommentBridge): vscode.CommentThread | undefined {
+		const threads = (bridge as unknown as { threadByKey: Map<string, vscode.CommentThread> }).threadByKey;
+		return threads.get('src/a.ts:new:5');
+	}
+
+	test('anchors a new-side comment on the document the diff editor shows', async () => {
+		const shownAsNew = vscode.Uri.file('/repo/src/a.ts').with({ scheme: 'git', query: '{"ref":""}' });
+		const bridge = bridgeAnchoringAt(() => shownAsNew);
+		bridge.activate(fakeContext() as never);
+		try {
+			await bridge.refresh();
+			assert.strictEqual(threadOf(bridge)?.uri.toString(), shownAsNew.toString());
+		} finally {
+			bridge.dispose();
+		}
+	});
+
+	test('re-anchors the thread when the open diff switches documents', async () => {
+		const workingTree = vscode.Uri.file('/repo/src/a.ts');
+		const shownAsNew = workingTree.with({ scheme: 'git', query: '{"ref":""}' });
+		let anchor = shownAsNew;
+		const bridge = bridgeAnchoringAt(() => anchor);
+		bridge.activate(fakeContext() as never);
+		try {
+			await bridge.refresh();
+			anchor = workingTree;
+			await bridge.refresh();
+			assert.strictEqual(threadOf(bridge)?.uri.toString(), workingTree.toString());
+		} finally {
+			bridge.dispose();
+		}
+	});
+});

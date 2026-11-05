@@ -2,6 +2,18 @@
 
 All notable changes to the "hunk-review" extension will be documented in this file.
 
+## [0.5.6]
+
+- The review covers the **working tree only** (unstaged edits and untracked files), matching what `hunk diff` loads: staged changes are no longer commentable, since hunk never holds them and rejects any comment on them ("No diff file matches …"). Staging a change that already has comments now warns how many comments will not be sent and marks them stale, instead of leaving them silently unsendable.
+- Sending is no longer all-or-nothing: comments whose files are not in the session's diff are skipped with their count in the warning, and a batch hunk still refuses is retried comment by comment, so one bad anchor doesn't take the rest down with it.
+- Fix the `session review` parser for hunk 0.24, which wraps the payload as `{"review": {…}}` — the empty result made a single failed send mark every pending comment stale.
+- Comments are only offered on lines hunk can actually receive: the diff surface, the stale marking and the send path all derive from the working tree diff.
+
+## [0.5.3]
+
+- Fix comments added in a diff of a *staged* change landing on the wrong side: they were stored as anchors to the deleted line and appeared on the left (HEAD) side after adding. VS Code renders the new side of that diff from the git index — a `git:`-scheme document like the original side — so the scheme alone no longer decides the side; the open diff editor does.
+- Comments now render on whichever document the open diff shows for the new side (the working tree file, or the index when the file's staged changes are reviewed from the SCM view), and are re-anchored when that document changes. Highlighting also picks the right side of such a diff: added lines are painted on the index document, removed ones on HEAD, instead of both sides being treated as HEAD.
+
 ## [0.5.2]
 
 - Show comments you wrote in hunk itself (TUI, MCP, CLI) as yours: they used to appear as "AI Agent" notes, because hunk reports them with `source: "agent"` and only the separate `author: "user"` field marks the human author. Agent replies to them are now labeled "↳ reply to You" instead of "↳ reply to AI Agent", and they no longer offer a Reply button. Notes cached by older extension versions carry no `author` and stay as "AI Agent" until a live session re-reads them.
