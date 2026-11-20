@@ -40,6 +40,11 @@ where a coding agent can read them.
 - After you commit, comments whose lines went into the commit are moved to
   `.hunk-review/archive.json` (with the commit sha); comments on lines that
   are still changed stay active.
+- Clears the review with the "Clear hunk Session" command (also in the
+  review menu): every comment of the live hunk session (human notes included)
+  and the local mirror in `.hunk-review/comments.json`, cached notes too — the
+  archive is kept. It asks for confirmation; with no live session only the
+  local comments are dropped.
 - Stops the session when the working tree becomes clean (committed or
   reverted), or via the "Stop hunk Session" command.
 
@@ -114,6 +119,10 @@ check-types`, `npm run lint`. Build: `npm run compile`; production package:
   review comments (`https://github.com/<username>.png`). Leave empty to
   auto-detect from the GitHub account signed in to VS Code (Accounts menu), or
   else from a GitHub noreply commit email in your git config.
+- `hunk-review.anchorContextLines` — how many neighbouring lines of the
+  commented line are memorised (0-5, default 2), so a comment follows its code
+  when lines above it are inserted or deleted. Only affects comments created
+  after the change.
 
 ## Known Issues
 

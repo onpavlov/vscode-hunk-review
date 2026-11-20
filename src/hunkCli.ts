@@ -169,6 +169,11 @@ export class HunkCli {
 		return parseJson<{ result: ApplyResult }>(stdout).result;
 	}
 
+	/** Deletes every comment of the live session — human notes included (`--all`). */
+	async clearComments(repoRoot: string): Promise<void> {
+		await this.run(['session', 'comment', 'clear', '--repo', repoRoot, '--all', '--yes']);
+	}
+
 	async listNotes(repoRoot: string, type: 'live' | 'all' = 'all'): Promise<HunkNote[]> {
 		const { stdout } = await this.run(
 			['session', 'comment', 'list', '--repo', repoRoot, '--type', type, '--json'],

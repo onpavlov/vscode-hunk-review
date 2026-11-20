@@ -10,6 +10,7 @@ import type {
 	HunkNote,
 	StoredComment,
 	StoredNote,
+	TextAnchor,
 } from './types.js';
 
 const EMPTY: CommentStoreData = { version: 1, comments: [], notes: [] };
@@ -67,13 +68,14 @@ export class CommentStore {
 		filePath: string,
 		target: CommentTarget,
 		summary: string,
-		replyTo?: string,
+		options: { replyTo?: string; anchor?: TextAnchor } = {},
 	): Promise<StoredComment> {
 		if ((target.newLine !== undefined) === (target.oldLine !== undefined)) {
 			throw new Error('Comment target must be exactly one of newLine or oldLine');
 		}
 		return this.exclusive(async () => {
 			const data = await this.load();
+			const { replyTo, anchor } = options;
 			const comment: StoredComment = {
 				id: crypto.randomUUID(),
 				filePath,
@@ -81,11 +83,47 @@ export class CommentStore {
 				summary,
 				status: 'pending',
 				...(replyTo ? { replyTo } : {}),
+				...(anchor ? { anchor } : {}),
 				createdAt: new Date().toISOString(),
 			};
 			data.comments.push(comment);
 			await this.write(data);
 			return comment;
+		});
+	}
+
+	/**
+	 * Moves the anchors of the given comments in one write: `target.newLine` and `anchor.line` are
+	 * updated together, ids that vanished between load and write are skipped.
+	 * Returns how many comments moved.
+	 */
+	async reanchor(updates: Array<{ id: string; line: number }>): Promise<number> {
+		if (updates.length === 0) {
+			return 0;
+		}
+		return this.exclusive(async () => {
+			const data = await this.load();
+			const byId = new Map(data.comments.map((c) => [c.id, c] as const));
+			let moved = 0;
+			for (const { id, line } of updates) {
+				const comment = byId.get(id);
+				if (!comment || comment.target.newLine === undefined) {
+					continue; // deleted or archived between load and write
+				}
+				if (comment.target.newLine === line && comment.anchor?.line === line) {
+					continue;
+				}
+				comment.target = { ...comment.target, newLine: line };
+				if (comment.anchor) {
+					comment.anchor = { ...comment.anchor, line };
+				}
+				moved += 1;
+			}
+			if (moved === 0) {
+				return 0;
+			}
+			await this.write(data);
+			return moved;
 		});
 	}
 
@@ -177,6 +215,22 @@ export class CommentStore {
 			data.notes = (data.notes ?? []).filter((n) => !wantedNotes.has(n.noteId));
 			await this.write(data);
 			return moved.length;
+		});
+	}
+
+	/**
+	 * Drops every comment and cached note from the active store — the archive is kept.
+	 * Returns how many comments were removed.
+	 */
+	async clear(): Promise<number> {
+		return this.exclusive(async () => {
+			const data = await this.load();
+			const removed = data.comments.length;
+			if (removed === 0 && (data.notes ?? []).length === 0) {
+				return 0;
+			}
+			await this.write({ version: 1, comments: [], notes: [] });
+			return removed;
 		});
 	}
 

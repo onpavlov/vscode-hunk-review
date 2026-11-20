@@ -53,6 +53,30 @@ suite('buildThreadDescriptors', () => {
 		assert.strictEqual(desc[0].comments[0].author, 'You');
 	});
 
+	test('a note on the old line of a re-anchored sent comment is filtered by sessionCommentId', () => {
+		// The store moved our comment down after an insertion above; hunk still reports the old line.
+		const note: HunkNote = {
+			noteId: 'mcp:9',
+			source: 'agent',
+			author: 'user',
+			filePath: 'src/a.ts',
+			hunkIndex: 0,
+			newRange: [10, 10],
+			body: 'ours',
+			createdAt: '2026-09-10T00:00:01Z',
+			editable: false,
+		};
+		const desc = buildThreadDescriptors(
+			[stored({ status: 'sent', sessionCommentId: 'mcp:9', target: { newLine: 14 } })],
+			[note],
+		);
+
+		// Without the id filter the note would land on line 10 as a second thread.
+		assert.strictEqual(desc.length, 1);
+		assert.strictEqual(desc[0].start, 14);
+		assert.strictEqual(desc[0].comments.length, 1);
+	});
+
 	test('agent note without our thread creates read-only thread', () => {
 		const note: HunkNote = {
 			noteId: 'n2',

@@ -17,6 +17,7 @@ suite('extension activation', () => {
 			'hunk-review.sendComments',
 			'hunk-review.stopSession',
 			'hunk-review.connectToSession',
+			'hunk-review.clearSession',
 			'hunk-review.menu',
 			'hunk-review.addComment',
 			'hunk-review.editComment',

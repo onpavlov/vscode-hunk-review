@@ -2,7 +2,7 @@
   "name": "hunk-review",
   "displayName": "hunk-review",
   "description": "Comment on uncommitted diffs in native VS Code diff editors and send the comments to a live hunk session for a coding agent to read and reply.",
-  "version": "0.5.6",
+  "version": "0.7.0",
   "publisher": "pavlovon",
   "license": "MIT",
   "icon": "assets/icon.png",
@@ -58,6 +58,12 @@
         "command": "hunk-review.connectToSession",
         "title": "%command.connectToSession.title%",
         "category": "hunk-review"
+      },
+      {
+        "command": "hunk-review.clearSession",
+        "title": "%command.clearSession.title%",
+        "category": "hunk-review",
+        "icon": "$(clear-all)"
       },
       {
         "command": "hunk-review.menu",
@@ -159,6 +165,13 @@
           "type": "string",
           "default": "",
           "markdownDescription": "%configuration.githubUsername.description%"
+        },
+        "hunk-review.anchorContextLines": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5,
+          "default": 2,
+          "markdownDescription": "%configuration.anchorContextLines.description%"
         }
       }
     }

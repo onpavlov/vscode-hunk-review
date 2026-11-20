@@ -3,6 +3,7 @@
 	"command.sendComments.title": "Отправить комментарии агенту",
 	"command.stopSession.title": "Остановить hunk сессию",
 	"command.connectToSession.title": "Подключиться к сессии",
+	"command.clearSession.title": "Очистить hunk сессию",
 	"command.menu.title": "Меню ревью",
 	"command.addComment.title": "Добавить комментарий",
 	"command.editComment.title": "Изменить комментарий",
@@ -10,5 +11,6 @@
 	"command.replyToNote.title": "Ответить",
 	"command.saveComment.title": "Сохранить комментарий",
 	"command.cancelEditComment.title": "Отменить редактирование",
-	"configuration.githubUsername.description": "Имя пользователя GitHub для вашей аватарки в комментариях ревью (`https://github.com/<username>.png`). Оставьте пустым, чтобы определить автоматически по аккаунту GitHub, в который выполнен вход в VS Code, а если его нет — по noreply-адресу коммитов GitHub из вашей git-конфигурации."
+	"configuration.githubUsername.description": "Имя пользователя GitHub для вашей аватарки в комментариях ревью (`https://github.com/<username>.png`). Оставьте пустым, чтобы определить автоматически по аккаунту GitHub, в который выполнен вход в VS Code, а если его нет — по noreply-адресу коммитов GitHub из вашей git-конфигурации.",
+	"configuration.anchorContextLines.description": "Сколько соседних строк прокомментированной строки запоминать, чтобы комментарий ехал вместе с кодом при вставке или удалении строк выше (0-5). Влияет только на комментарии, созданные после изменения."
 }

@@ -139,6 +139,18 @@ suite('HunkCli', () => {
 		assert.deepStrictEqual(review.files[0].hunks, [{ newStart: 3, newLines: 2 }]);
 	});
 
+	test('clearComments deletes every session comment, human notes included', async () => {
+		const captured: string[][] = [];
+		const runner: HunkRunner = async (_file, args) => {
+			captured.push(args);
+			return { stdout: 'Cleared 3 comments.', stderr: '' };
+		};
+		await createHunkCli(runner).clearComments('/tmp/r');
+		assert.deepStrictEqual(captured, [
+			['session', 'comment', 'clear', '--repo', '/tmp/r', '--all', '--yes'],
+		]);
+	});
+
 	test('non-zero exit raises HunkCommandError with stderr', async () => {
 		const runner: HunkRunner = async () => {
 			const err = new Error('spawn failed') as Error & { code: number; stderr: string };

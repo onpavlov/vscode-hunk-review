@@ -22,6 +22,10 @@ function tmpDir(): string {
 	return fs.mkdtempSync(path.join(os.tmpdir(), 'hunk-review-store-'));
 }
 
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 suite('CommentStore', () => {
 	test('add persists comment with pending status and reloads', async () => {
 		const dir = tmpDir();
@@ -39,10 +43,67 @@ suite('CommentStore', () => {
 
 	test('add persists replyTo for a reply to a hunk note', async () => {
 		const dir = tmpDir();
-		const c = await new CommentStore(dir).add('src/a.ts', { newLine: 5 }, 'done', 'mcp:3');
+		const c = await new CommentStore(dir).add('src/a.ts', { newLine: 5 }, 'done', { replyTo: 'mcp:3' });
 		assert.strictEqual(c.replyTo, 'mcp:3');
 		const data = await new CommentStore(dir).load();
 		assert.strictEqual(data.comments[0].replyTo, 'mcp:3');
+	});
+
+	test('add persists the text anchor', async () => {
+		const dir = tmpDir();
+		const anchor = { line: 5, text: 'const x = 1;', before: ['fn main() {'], after: ['return x;'] };
+		const c = await new CommentStore(dir).add('src/a.ts', { newLine: 5 }, 'check', { anchor });
+		assert.deepStrictEqual(c.anchor, anchor);
+		assert.deepStrictEqual((await new CommentStore(dir).load()).comments[0].anchor, anchor);
+	});
+
+	test('reanchor moves several comments in one write', async () => {
+		const dir = tmpDir();
+		const store = new CommentStore(dir);
+		const a = await store.add('a.ts', { newLine: 5 }, 'x', {
+			anchor: { line: 5, text: 'A', before: [], after: [] },
+		});
+		const b = await store.add('a.ts', { newLine: 9 }, 'y', {
+			anchor: { line: 9, text: 'B', before: [], after: [] },
+		});
+
+		assert.strictEqual(await store.reanchor([{ id: a.id, line: 7 }, { id: b.id, line: 11 }]), 2);
+
+		const data = await new CommentStore(dir).load();
+		const byId = new Map(data.comments.map((c) => [c.id, c]));
+		assert.strictEqual(byId.get(a.id)?.target.newLine, 7);
+		assert.strictEqual(byId.get(a.id)?.anchor?.line, 7);
+		assert.strictEqual(byId.get(b.id)?.target.newLine, 11);
+		assert.strictEqual(byId.get(b.id)?.anchor?.line, 11);
+	});
+
+	test('reanchor writes nothing when no line changed', async () => {
+		const dir = tmpDir();
+		const store = new CommentStore(dir);
+		const a = await store.add('a.ts', { newLine: 5 }, 'x', {
+			anchor: { line: 5, text: 'A', before: [], after: [] },
+		});
+		const file = path.join(dir, 'comments.json');
+		const mtime = fs.statSync(file).mtimeMs;
+		await delay(20);
+
+		assert.strictEqual(await store.reanchor([{ id: a.id, line: 5 }]), 0);
+		assert.strictEqual(fs.statSync(file).mtimeMs, mtime);
+	});
+
+	test('reanchor skips ids that vanished before the write', async () => {
+		const dir = tmpDir();
+		const store = new CommentStore(dir);
+		const a = await store.add('a.ts', { newLine: 5 }, 'x', {
+			anchor: { line: 5, text: 'A', before: [], after: [] },
+		});
+		await store.remove(a.id);
+		const file = path.join(dir, 'comments.json');
+		const mtime = fs.statSync(file).mtimeMs;
+		await delay(20);
+
+		assert.strictEqual(await store.reanchor([{ id: a.id, line: 9 }, { id: 'nope', line: 3 }]), 0);
+		assert.strictEqual(fs.statSync(file).mtimeMs, mtime);
 	});
 
 	test('loads a comments.json written before notes existed as having no notes', async () => {
@@ -109,6 +170,31 @@ suite('CommentStore', () => {
 		await store.remove(c.id);
 		const data = await store.load();
 		assert.strictEqual(data.comments.length, 0);
+	});
+
+	test('clear drops every comment and cached note but keeps the archive', async () => {
+		const dir = tmpDir();
+		const store = new CommentStore(dir);
+		const a = await store.add('a.ts', { newLine: 1 }, 'x');
+		await store.add('b.ts', { newLine: 2 }, 'y');
+		await store.mergeNotes('s1', [note('n1')]);
+		await store.archive([a.id], 'abc123');
+
+		assert.strictEqual(await store.clear(), 1);
+
+		const active = await store.load();
+		assert.deepStrictEqual(active.comments, []);
+		assert.deepStrictEqual(active.notes, []);
+		assert.deepStrictEqual(
+			(await store.loadArchive()).comments.map((c) => c.id),
+			[a.id],
+		);
+	});
+
+	test('clear on an empty store writes nothing and returns 0', async () => {
+		const dir = tmpDir();
+		assert.strictEqual(await new CommentStore(dir).clear(), 0);
+		assert.strictEqual(fs.existsSync(path.join(dir, 'comments.json')), false);
 	});
 
 	test('pending returns only pending comments', async () => {

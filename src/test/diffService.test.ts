@@ -168,6 +168,44 @@ suite('DiffService.getChangedLines (new files)', () => {
 	});
 });
 
+suite('DiffService.readWorkingTreeLines', () => {
+	let dir: string;
+	setup(() => {
+		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hunk-review-lines-'));
+	});
+	teardown(() => {
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+
+	test('returns the lines of a file under an explicit root', async () => {
+		fs.writeFileSync(path.join(dir, 'a.ts'), 'one\ntwo\nthree');
+		const service = new DiffService(() => undefined);
+
+		assert.deepStrictEqual(await service.readWorkingTreeLines(vscode.Uri.file(dir), 'a.ts'), [
+			'one',
+			'two',
+			'three',
+		]);
+	});
+
+	test('returns undefined for a missing file', async () => {
+		const service = new DiffService(() => undefined);
+		assert.strictEqual(await service.readWorkingTreeLines(vscode.Uri.file(dir), 'gone.ts'), undefined);
+	});
+
+	test('drops the trailing empty element of a file that ends with a newline', async () => {
+		fs.writeFileSync(path.join(dir, 'a.ts'), 'one\ntwo\n');
+		const service = new DiffService(() => undefined);
+
+		// The final newline is a separator, not an extra empty line: otherwise the anchor context of
+		// the last line would depend on it.
+		assert.deepStrictEqual(await service.readWorkingTreeLines(vscode.Uri.file(dir), 'a.ts'), [
+			'one',
+			'two',
+		]);
+	});
+});
+
 suite('DiffService.getUserEmail', () => {
 	test('returns user.email from the repo config', async () => {
 		const repo = fakeRepo(async (key) => (key === 'user.email' ? 'octocat@example.com' : ''));

@@ -5,6 +5,21 @@ export interface CommentTarget {
 	oldLine?: number;
 }
 
+/**
+ * Content anchor of a comment: the text of the line it was placed on plus the lines around it,
+ * all trimmed. Lets the comment follow its code when lines above it are inserted or deleted.
+ */
+export interface TextAnchor {
+	/** 1-based line number at capture time; also the last known line. */
+	line: number;
+	/** Trimmed text of the commented line. Never empty — a blank line gets no anchor. */
+	text: string;
+	/** Trimmed lines above, nearest first: before[0] sits at line-1. */
+	before: string[];
+	/** Trimmed lines below, nearest first: after[0] sits at line+1. */
+	after: string[];
+}
+
 export interface StoredComment {
 	id: string;
 	filePath: string;
@@ -14,6 +29,8 @@ export interface StoredComment {
 	sessionCommentId?: string;
 	/** hunk note id this comment replies to; sent as `replyTo` instead of a line anchor */
 	replyTo?: string;
+	/** content anchor, absent on comments created before it existed and on replies */
+	anchor?: TextAnchor;
 	createdAt: string;
 }
 

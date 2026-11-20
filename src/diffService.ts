@@ -177,19 +177,34 @@ export class DiffService {
 			if (newLines.has(file)) {
 				continue;
 			}
-			try {
-				const bytes = await vscode.workspace.fs.readFile(uri);
-				const lineCount = Buffer.from(bytes).toString('utf8').split('\n').length;
-				newLines.set(file, [{ start: 1, end: lineCount }]);
-				// Every line of a new file is an addition on the new side.
-				highlights.added.set(
-					file,
-					Array.from({ length: lineCount }, (_, i) => i + 1),
-				);
-			} catch {
+			const lines = await readUtf8Lines(uri);
+			if (!lines) {
 				// file vanished since the status snapshot (renamed/deleted mid-poll) — skip it
+				continue;
 			}
+			const lineCount = lines.length;
+			newLines.set(file, [{ start: 1, end: lineCount }]);
+			// Every line of a new file is an addition on the new side.
+			highlights.added.set(
+				file,
+				Array.from({ length: lineCount }, (_, i) => i + 1),
+			);
 		}
+	}
+
+	/**
+	 * Lines of a working-tree file read from disk under an explicit `root` (repo-relative paths are
+	 * what the diff map uses). The buffer of an open editor is deliberately not consulted: the diff
+	 * reflects the disk too. Undefined when the file cannot be read.
+	 */
+	async readWorkingTreeLines(root: vscode.Uri, file: string): Promise<string[] | undefined> {
+		const lines = await readUtf8Lines(vscode.Uri.joinPath(root, file));
+		if (!lines) {
+			return undefined;
+		}
+		// A file that ends with a newline yields a trailing empty element. It is not a line, and
+		// leaving it in would make the anchor context of the last line depend on the final newline.
+		return lines.length > 1 && lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
 	}
 
 	async isWorktreeClean(): Promise<boolean> {
@@ -262,6 +277,17 @@ export class DiffService {
 			modifiedUri,
 			`hunk review: ${path.basename(modifiedUri.fsPath)}`,
 		);
+	}
+}
+
+/** Reads a document as lines, or undefined when it cannot be read. Keeps the CRLF handling in one
+ *  place: the untracked-file scan and the anchor reader must split lines the same way. */
+export async function readUtf8Lines(uri: vscode.Uri): Promise<string[] | undefined> {
+	try {
+		const bytes = await vscode.workspace.fs.readFile(uri);
+		return Buffer.from(bytes).toString('utf8').split(/\r?\n/);
+	} catch {
+		return undefined;
 	}
 }
 

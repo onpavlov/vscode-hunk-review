@@ -2,6 +2,15 @@
 
 All notable changes to the "hunk-review" extension will be documented in this file.
 
+## [0.7.0]
+
+- Comments follow their code instead of a line number: every new comment remembers the text of its line and the neighbouring lines, and is re-anchored when lines above it are inserted or deleted — in the diff view and in what is sent to the agent (before sending, on every file save and on window reload). Lines outside the working-tree diff are never taken as a new position, so a comment never jumps into unchanged code; when the commented line itself is rewritten, the comment stays where it was. Applies to new comments only — ones stored by older versions keep the line-number anchor.
+- New setting `hunk-review.anchorContextLines` (0-5, default 2) — how many neighbouring lines are memorised for matching; affects only newly created comments.
+
+## [0.6.0]
+
+- New **Clear hunk Session** command (also in the review menu): deletes every comment of the live hunk session, including human notes, and drops the local mirror in `.hunk-review/comments.json` — cached notes included. The archive is kept. Asks for confirmation first; without a live session only the local store is cleared.
+
 ## [0.5.6]
 
 - The review covers the **working tree only** (unstaged edits and untracked files), matching what `hunk diff` loads: staged changes are no longer commentable, since hunk never holds them and rejects any comment on them ("No diff file matches …"). Staging a change that already has comments now warns how many comments will not be sent and marks them stale, instead of leaving them silently unsendable.
