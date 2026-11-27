@@ -2,6 +2,13 @@
 
 All notable changes to the "hunk-review" extension will be documented in this file.
 
+## [0.8.0]
+
+- **Multi-root workspaces and several repositories in one window.** Each git repository now gets its own independent review: its own `.hunk-review` store at the repository root, its own hunk session, its own comments and highlighting. Previously everything was tied to the first workspace folder, so in a multi-root workspace the "+" comment button was missing in every other repository.
+- Window-level commands (status bar, review menu) act on the repository of the active editor and otherwise ask which repository to use; **Send Comments** sends the pending comments of every repository to its own session. The status bar sums up pending comments and live sessions across repositories.
+- Repositories that open after startup (a folder added to the workspace, a submodule) are picked up automatically.
+- A repository root is now always the git root: if you opened a subfolder of a repository, the store lives in `<repository>/.hunk-review` instead of `<subfolder>/.hunk-review` (existing comments in the subfolder are not migrated).
+
 ## [0.7.0]
 
 - Comments follow their code instead of a line number: every new comment remembers the text of its line and the neighbouring lines, and is re-anchored when lines above it are inserted or deleted — in the diff view and in what is sent to the agent (before sending, on every file save and on window reload). Lines outside the working-tree diff are never taken as a new position, so a comment never jumps into unchanged code; when the commented line itself is rewritten, the comment stays where it was. Applies to new comments only — ones stored by older versions keep the line-number anchor.

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { HunkNote, StoredComment } from './types.js';
 import type { CommentStore } from './commentStore.js';
 import type { ChangedLines } from './diffService.js';
+import { repoRelative } from './repoPaths.js';
 
 /**
  * Re-applies a thread's range to VS Code even when the new range equals the
@@ -281,7 +282,16 @@ export class CommentBridge {
 		private readonly modifiedUri?: (file: string) => vscode.Uri,
 		/** Which side of a diff editor a document belongs to; `git:` documents are original by default. */
 		private readonly diffSideOf?: (uri: vscode.Uri) => 'old' | 'new',
+		/**
+		 * Root of the repository this bridge serves: file paths in the store and the diff maps are
+		 * relative to it. Defaults to the first workspace folder (single-folder windows).
+		 */
+		private readonly repoRoot?: vscode.Uri,
 	) {}
+
+	private rootFsPath(): string {
+		return this.repoRoot?.fsPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+	}
 
 	/** Anchor of a thread this bridge manages; undefined for a draft ("Start discussion") thread. */
 	threadAnchor(thread: vscode.CommentThread): ThreadAnchor | undefined {
@@ -293,38 +303,52 @@ export class CommentBridge {
 		return undefined;
 	}
 
+	/** Standalone mode: creates and owns a comment controller (single-repository use). */
 	activate(context: vscode.ExtensionContext): void {
 		this.extensionUri = context.extensionUri;
-		this.controller = vscode.comments.createCommentController(
+		const controller = vscode.comments.createCommentController(
 			'hunk-review.comments',
 			'Hunk Review',
 		);
-		this.controller.options = {
+		controller.options = {
 			prompt: vscode.l10n.t('Type the text and run "Add Comment"'),
 			placeHolder: vscode.l10n.t('The comment text will be sent to the hunk session'),
 		};
-
-		// Provide commenting ranges only on lines that were actually changed.
-		// A file with no entry in the diff map gets none: hunk only knows files in the
-		// diff, so a comment there could never be sent. New files (staged or untracked)
-		// are in the map as whole-file ranges, so they stay commentable.
-		// The diff editor's original (HEAD) document — `git:`-scheme — carries the deleted
-		// lines, so it needs the old-side ranges, not the new-side ones. Being `git:`-scheme
-		// alone doesn't make a document the original side, though: a staged change is diffed
-		// against the index, which VS Code serves over the same scheme.
-		this.controller.commentingRangeProvider = {
-			provideCommentingRanges: async (document) => {
-				const changedLines = await this.getChangedLines();
-				const rel = relPath(document.uri);
-				const side =
-					this.diffSideOf?.(document.uri) ??
-					(document.uri.scheme === 'git' ? 'old' : 'new');
-				const ranges = (side === 'old' ? changedLines.oldLines : changedLines.newLines).get(rel) ?? [];
-				return ranges.map((r) => new vscode.Range(r.start - 1, 0, r.end - 1, Number.MAX_SAFE_INTEGER));
-			},
+		controller.commentingRangeProvider = {
+			provideCommentingRanges: (document) => this.provideCommentingRanges(document),
 		};
+		this.controller = controller;
 
-		context.subscriptions.push(this.controller, { dispose: () => this.dispose() });
+		context.subscriptions.push(controller, { dispose: () => this.dispose() });
+	}
+
+	/**
+	 * Shared mode: renders into a controller created and configured by the caller. A window with
+	 * several repositories keeps one controller (one "Hunk Review" entry in the Comments panel)
+	 * whose range provider hands each document to the bridge of the repository that owns it.
+	 */
+	attach(controller: vscode.CommentController, extensionUri: vscode.Uri): void {
+		this.controller = controller;
+		this.extensionUri = extensionUri;
+	}
+
+	/**
+	 * Commenting ranges for a document: only lines that were actually changed.
+	 * A file with no entry in the diff map gets none: hunk only knows files in the
+	 * diff, so a comment there could never be sent. New files (staged or untracked)
+	 * are in the map as whole-file ranges, so they stay commentable.
+	 * The diff editor's original (HEAD) document — `git:`-scheme — carries the deleted
+	 * lines, so it needs the old-side ranges, not the new-side ones. Being `git:`-scheme
+	 * alone doesn't make a document the original side, though: a staged change is diffed
+	 * against the index, which VS Code serves over the same scheme.
+	 */
+	async provideCommentingRanges(document: vscode.TextDocument): Promise<vscode.Range[]> {
+		const changedLines = await this.getChangedLines();
+		const rel = repoRelative(this.rootFsPath(), document.uri);
+		const side =
+			this.diffSideOf?.(document.uri) ?? (document.uri.scheme === 'git' ? 'old' : 'new');
+		const ranges = (side === 'old' ? changedLines.oldLines : changedLines.newLines).get(rel) ?? [];
+		return ranges.map((r) => new vscode.Range(r.start - 1, 0, r.end - 1, Number.MAX_SAFE_INTEGER));
 	}
 
 	refresh(): Promise<void> {
@@ -351,7 +375,8 @@ export class CommentBridge {
 			const uri =
 				d.side === 'old'
 					? this.originalUri(d.file)
-					: (this.modifiedUri?.(d.file) ?? vscode.Uri.joinPath(workspaceRoot(), d.file));
+					: (this.modifiedUri?.(d.file) ??
+						vscode.Uri.joinPath(this.repoRoot ?? workspaceRoot(), d.file));
 			const range = new vscode.Range(d.start - 1, 0, d.end - 1, Number.MAX_SAFE_INTEGER);
 			const comments = d.comments.map(
 				(c): HunkComment => ({
@@ -437,6 +462,21 @@ export class CommentBridge {
 		this.threadByKey.clear();
 	}
 
+	/**
+	 * Removes this bridge's threads from a shared controller — what a closed repository needs,
+	 * since the controller itself lives on for the other repositories.
+	 */
+	disposeThreads(): void {
+		for (const thread of this.threadByKey.values()) {
+			try {
+				thread.dispose();
+			} catch {
+				// the controller is already gone — nothing left to remove
+			}
+		}
+		this.threadByKey.clear();
+	}
+
 	private avatarUri(avatar: 'user' | 'agent'): vscode.Uri | undefined {
 		if (avatar === 'user') {
 			const githubAvatar = this.resolveUserAvatarUri();
@@ -457,9 +497,4 @@ function workspaceRoot(): vscode.Uri {
 		throw new Error('No workspace folder is open');
 	}
 	return root;
-}
-
-function relPath(uri: vscode.Uri): string {
-	const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-	return uri.fsPath.startsWith(root) ? uri.fsPath.slice(root.length + 1) : uri.fsPath;
 }

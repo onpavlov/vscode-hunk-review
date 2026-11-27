@@ -11,6 +11,8 @@
 	"Git repository not found": "Git-репозиторий не найден",
 	"No uncommitted changes": "Незакоммиченных изменений нет",
 	"hunk session ended": "hunk-сессия завершилась",
+	"hunk session ended in {0}": "hunk-сессия завершилась в {0}",
+	"Select a repository": "Выберите репозиторий",
 	"stopped by user": "остановлено пользователем",
 	"Open review": "Открыть ревью",
 	"Send comments to agent ({0})": "Отправить комментарии агенту ({0})",

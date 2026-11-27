@@ -1,45 +1,28 @@
 import * as vscode from 'vscode';
-import * as path from 'node:path';
-import * as fs from 'node:fs';
 import {
 	createHunkCli,
-	HunkCommandError,
 	HunkNotInstalledError,
 	isHunkTooOldForReplies,
 	REPLY_MIN_VERSION_LABEL,
 	supportsReplies,
 } from './hunkCli.js';
-import type { ApplyCommentItem } from './hunkCli.js';
-import type { StoredComment } from './types.js';
-import { CommentStore, ensureGitignore } from './commentStore.js';
-import { DiffService } from './diffService.js';
-import { CommentBridge } from './commentBridge.js';
+import { DiffService, getGitApi } from './diffService.js';
+import type { GitApiLike, GitRepositoryLike } from './diffService.js';
 import type { HunkComment } from './commentBridge.js';
-import { CommentAnchors } from './anchors.js';
-import { captureAnchor, DEFAULT_ANCHOR_CONTEXT } from './textAnchor.js';
-import { SessionManager } from './sessionManager.js';
-import { HunkSync } from './hunkSync.js';
-import { createDecorations } from './decorations.js';
-import { createDebouncer } from './debounce.js';
+import { DEFAULT_ANCHOR_CONTEXT } from './textAnchor.js';
+import { RepoReview } from './repoReview.js';
 import { formatStatusText } from './statusText.js';
-import { findOutOfDiffCommentIds,
-	findOutOfDiffNoteIds,
-	findStaleCommentIds,
-	hunksToChangedLines,
-	isLineInDiff,
-} from './staleComments.js';
-import { applyWithFallback, splitDeliverable } from './sendPlan.js';
-import type { ChangedLines } from './diffService.js';
-import { createUserAvatarResolver, signedInGithubLogin } from './userAvatar.js';
+import { isInsideRoot } from './repoPaths.js';
 
-// hunk marks `session comment apply` notes as agent-sourced (source: "agent").
-// The apply JSON exposes no `source`/`type` field, only `author` — set it so the
-// coding agent can recognize these as human-authored review comments.
-const REVIEW_AUTHOR = 'user';
+const INSTALL_COMMAND = 'npm install --global hunkdiff';
+const INSTALL_DOCS_URL = 'https://www.hunk.dev/docs/start/install/';
+
+interface ReviewPick extends vscode.QuickPickItem {
+	review: RepoReview;
+}
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-	const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-	if (!root) {
+	if (!vscode.workspace.workspaceFolders?.length) {
 		// Still register stub commands even if no workspace is open
 		// to allow for testing and future workspace opening
 		registerStubCommands(context);
@@ -47,53 +30,57 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	}
 
 	const cli = createHunkCli();
-	const hunkDir = path.join(root, '.hunk-review');
-	const store = new CommentStore(hunkDir);
-	const diff = new DiffService();
-	// Working-tree files are read under the repo root: the changed-line keys come from `git diff`
-	// and are repo-relative. Without a repository (test host) the window folder is the fallback.
-	const repoRootUri = () => diff.getRepo()?.rootUri ?? vscode.Uri.file(root);
-	const anchorContextLines = () =>
-		vscode.workspace
-			.getConfiguration('hunk-review')
-			.get<number>('anchorContextLines', DEFAULT_ANCHOR_CONTEXT);
-	const commentAnchors = new CommentAnchors(store, (file) =>
-		diff.readWorkingTreeLines(repoRootUri(), file),
-	);
-	const sync = new HunkSync(cli, root, {
-		isSessionAlive: () => cli.findSession(root).then((s) => s !== undefined),
-	});
-	const userAvatar = createUserAvatarResolver(() => diff.getUserEmail(), signedInGithubLogin);
+	// One review per git repository of the window, keyed by repository root. A multi-root workspace
+	// (or a folder holding several repositories) gets an independent review for each: its own
+	// `.hunk-review` store, its own hunk session, its own comments.
+	const reviews = new Map<string, RepoReview>();
 	// Resolved from `hunk --version` at activation; stays false (no reply box) until then
 	// or when hunk is missing / older than 0.22.
 	let repliesSupported = false;
-	const bridge = new CommentBridge(
-		store,
-		// Notes come from the store, not the live session: cached there by each poll,
-		// they survive the session ending (window reload, crash, auto-stop).
-		() => store.load().then((d) => d.notes ?? []),
-		() => diff.getChangedLines(),
-		(file) => diff.getOriginalUri(vscode.Uri.joinPath(vscode.Uri.file(root), file)),
-		() => userAvatar.uri(),
-		() => repliesSupported,
-		(file) =>
-			diff.getModifiedUri(vscode.Uri.joinPath(vscode.Uri.file(root), file)),
-		(uri) => diff.diffSideOf(uri),
-	);
-	const sessionManager = new SessionManager(cli, root, undefined, undefined, () =>
-		diff.isWorktreeClean(),
-	);
-	const decorations = createDecorations((uri) => diff.diffSideOf(uri));
-	context.subscriptions.push(decorations);
 
-	const refreshDecorations = async (changed?: ChangedLines) => {
-		decorations.update(changed ?? (await diff.getChangedLines()));
+	/** The review a document belongs to: the deepest repository root containing it (nested repos win). */
+	const reviewOwning = (uri: vscode.Uri): RepoReview | undefined => {
+		let best: RepoReview | undefined;
+		for (const review of reviews.values()) {
+			if (isInsideRoot(review.root, uri.fsPath) && (!best || review.root.length > best.root.length)) {
+				best = review;
+			}
+		}
+		return best;
+	};
+	const reviewOfComment = (comment: HunkComment | undefined): RepoReview | undefined =>
+		comment?.parent ? reviewOwning(comment.parent.uri) : undefined;
+
+	// --- status bar --------------------------------------------------------------------------
+
+	const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+	statusBar.command = 'hunk-review.menu';
+	statusBar.show();
+
+	// One-click entry point: shown until a hunk session is live.
+	const startStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
+	startStatusBar.text = `$(git-compare) ${vscode.l10n.t('Start review')}`;
+	startStatusBar.tooltip = vscode.l10n.t('Open the working tree review');
+	startStatusBar.command = 'hunk-review.openDiff';
+
+	// Separate button shown only when there are pending comments —
+	// the most frequent action shouldn't be hidden behind the QuickPick menu.
+	const sendStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+	sendStatusBar.command = 'hunk-review.sendComments';
+
+	const totalPending = async (): Promise<number> => {
+		let total = 0;
+		for (const review of [...reviews.values()]) {
+			total += await review.pendingCount();
+		}
+		return total;
 	};
 
-	const hasPending = async () => {
-		const n = await store.pendingCount();
+	// The status bar sums up all repositories: pending comments in any of them, a live session in any.
+	const refreshStatus = async () => {
+		const n = await totalPending();
 		await vscode.commands.executeCommand('setContext', 'hunk-review.hasPending', n > 0);
-		const sessionAlive = sessionManager.currentSession() !== undefined;
+		const sessionAlive = [...reviews.values()].some((r) => r.hasSession());
 		statusBar.text = formatStatusText(n, sessionAlive);
 		statusBar.tooltip = sessionAlive
 			? vscode.l10n.t('hunk session is active (click for menu)')
@@ -112,35 +99,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		}
 	};
 
-	const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-	statusBar.command = 'hunk-review.menu';
-	statusBar.show();
-
-	// One-click entry point: shown until a hunk session is live.
-	const startStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
-	startStatusBar.text = `$(git-compare) ${vscode.l10n.t('Start review')}`;
-	startStatusBar.tooltip = vscode.l10n.t('Open the working tree review');
-	startStatusBar.command = 'hunk-review.openDiff';
-
-	// Separate button shown only when there are pending comments —
-	// the most frequent action shouldn't be hidden behind the QuickPick menu.
-	const sendStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
-	sendStatusBar.command = 'hunk-review.sendComments';
-
-	// Serialize session operations: a watcher-triggered reload must not overlap
-	// with sending comments (apply validates the batch against the current diff).
-	let sessionOps: Promise<unknown> = Promise.resolve();
-	const serializeSessionOp = <T>(op: () => Promise<T>): Promise<T> => {
-		const run = sessionOps.then(op, op);
-		sessionOps = run.then(
-			() => undefined,
-			() => undefined,
-		);
-		return run;
-	};
-
-	const INSTALL_COMMAND = 'npm install --global hunkdiff';
-	const INSTALL_DOCS_URL = 'https://www.hunk.dev/docs/start/install/';
+	// --- hunk CLI hints ----------------------------------------------------------------------
 
 	// Recommend how to install the hunk CLI. Shown after starting a review (the diff
 	// itself works without hunk) and when sending comments fails because it is missing.
@@ -195,419 +154,169 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		}
 	};
 
-	// Files the live session actually holds. `comment apply` refuses anything else ("No diff file
-	// matches …") and rejects the whole batch with it, so they are split out before sending.
-	const filesInSession = async (): Promise<Set<string> | undefined> => {
-		try {
-			const review = await cli.sessionReview(root);
-			return new Set(review.files.map((f) => f.path));
-		} catch {
-			// Review unavailable (session just restarted): send everything and let hunk judge.
-			return undefined;
-		}
-	};
+	// --- comment controller ------------------------------------------------------------------
 
-	const sendComments = async () => {
-		if ((await store.pendingCount()) === 0) {
+	// One controller for all repositories (a single "Hunk Review" entry in the Comments panel, and
+	// the `commentController == hunk-review.comments` menu conditions keep working). Its range
+	// provider hands each document to the review of the repository the document lives in.
+	const controller = vscode.comments.createCommentController('hunk-review.comments', 'Hunk Review');
+	controller.options = {
+		prompt: vscode.l10n.t('Type the text and run "Add Comment"'),
+		placeHolder: vscode.l10n.t('The comment text will be sent to the hunk session'),
+	};
+	controller.commentingRangeProvider = {
+		provideCommentingRanges: (document) =>
+			reviewOwning(document.uri)?.bridge.provideCommentingRanges(document) ?? [],
+	};
+	context.subscriptions.push(controller);
+
+	// --- repository registry -----------------------------------------------------------------
+
+	const addRepo = (repo: GitRepositoryLike) => {
+		const root = repo.rootUri.fsPath;
+		if (reviews.has(root)) {
 			return;
 		}
-		await serializeSessionOp(async () => {
-			try {
-				// The numbers must be current: hunk validates the batch against its own diff.
-				await commentAnchors.reanchorAll(await diff.getChangedLines());
-				const pending = await store.pending();
-				if (pending.length === 0) {
-					return;
-				}
-				await sessionManager.ensureSession();
-				const all = await cli.listSessions();
-				const sameRepo = all.filter(
-					(s) =>
-						fs.realpathSync.native(s.repoRoot) === fs.realpathSync.native(root),
-				);
-				if (sameRepo.length > 1) {
-					void vscode.window.showInformationMessage(
-						vscode.l10n.t('Found several hunk sessions in this repository — using the first one.'),
-					);
-				}
-				// A reply whose parent note is gone (session restarted, note deleted) would fail
-				// the whole batch — it goes out as a regular comment on its anchor line instead.
-				const liveNoteIds = pending.some((c) => c.replyTo) && repliesSupported
-					? new Set((await cli.listNotes(root)).map((n) => n.noteId))
-					: new Set<string>();
-				const toItem = (c: StoredComment): ApplyCommentItem =>
-					c.replyTo && liveNoteIds.has(c.replyTo)
-						? { replyTo: c.replyTo, summary: c.summary, author: REVIEW_AUTHOR }
-						: {
-							filePath: c.filePath,
-							newLine: c.target.newLine,
-							oldLine: c.target.oldLine,
-							summary: c.summary,
-							author: REVIEW_AUTHOR,
-						};
-
-				// hunk rejects the whole batch over one anchor it can't place, so the comments it
-				// cannot hold are sorted out before sending instead of sinking the rest.
-				const { deliverable, skipped } = splitDeliverable(pending, await filesInSession());
-				for (const c of skipped) {
-					await store.update(c.id, { status: 'stale' });
-				}
-
-				// Applies one batch and flips the statuses; returns how many hunk accepted.
-				const applyBatch = async (items: StoredComment[]): Promise<number> => {
-					const result = await cli.applyComments(root, { comments: items.map(toItem) });
-					// Guard: the applied count must match the batch size before flipping statuses.
-					if (result.applied.length !== items.length) {
-						void vscode.window.showErrorMessage(
-							vscode.l10n.t(
-								'Comment sync error: expected {0} applied, got {1}. Statuses not updated.',
-								items.length,
-								result.applied.length,
-							),
-						);
-						return 0;
-					}
-					// The response is correlated back by array index.
-					for (let i = 0; i < items.length; i += 1) {
-						await store.update(items[i].id, {
-							status: 'sent',
-							sessionCommentId: result.applied[i]?.commentId,
-						});
-					}
-					return items.length;
-				};
-
-				const { sent, failed } = await applyWithFallback(deliverable, applyBatch);
-				for (const c of failed) {
-					await store.update(c.id, { status: 'stale' });
-				}
-				const notSent = skipped.length + failed.length;
-				if (notSent > 0) {
-					void vscode.window.showWarningMessage(
-						vscode.l10n.t(
-							'{0} comment(s) will not be sent: their lines are not in the hunk session\u2019s diff.',
-							notSent,
-						),
-					);
-				}
-				void vscode.window.showInformationMessage(
-					vscode.l10n.t(
-						'Sent {0} comment(s). hunk session is running in the background.',
-						sent,
-					),
-				);
-				await sync.pollOnce();
-				sync.start(5_000); // while the session is alive — poll for agent comments
-				await bridge.refresh();
-			} catch (err) {
-				if (err instanceof HunkNotInstalledError) {
-					void warnHunkNotInstalled();
-					return;
-				}
-				await markStaleOnApplyFailure(err);
-				// HunkCommandError.message is just "<cmd> exited with code N" — the actual
-				// reason lives in stderr, which was previously dropped on the floor here.
-				const detail =
-					err instanceof HunkCommandError && err.stderr.trim()
-						? `${err.message}: ${err.stderr.trim()}`
-						: String(err);
-				void vscode.window.showErrorMessage(
-					vscode.l10n.t('Failed to send comments: {0}', detail),
-				);
-			}
+		const review: RepoReview = new RepoReview({
+			cli,
+			rootUri: repo.rootUri,
+			diff: new DiffService(getGitApi, root),
+			ownsUri: (uri) => reviewOwning(uri) === review,
+			controller,
+			extensionUri: context.extensionUri,
+			repliesSupported: () => repliesSupported,
+			anchorContextLines: () =>
+				vscode.workspace
+					.getConfiguration('hunk-review')
+					.get<number>('anchorContextLines', DEFAULT_ANCHOR_CONTEXT),
+			warnHunkNotInstalled: () => void warnHunkNotInstalled(),
+			isMultiRepo: () => reviews.size > 1,
+			onStateChange: () => void refreshStatus(),
 		});
-		await hasPending();
+		reviews.set(root, review);
+		review.start().catch((err) => console.warn('[hunk-review] failed to start the review', err));
+		void refreshStatus();
 	};
 
-	// Wipes the review: hunk's session comments first (they are the source of truth for what
-	// was sent and what the agent answered), then the local mirror, so nothing reappears on
-	// the next poll. Without a live session only the local store is cleared.
-	const clearSession = async () => {
-		const { comments, notes = [] } = await store.load();
-		if (comments.length === 0 && notes.length === 0) {
-			void vscode.window.showInformationMessage(
-				vscode.l10n.t('There are no comments to clear.'),
-			);
-			return;
+	const removeRepo = (repo: GitRepositoryLike) => {
+		const root = repo.rootUri.fsPath;
+		reviews.get(root)?.dispose();
+		reviews.delete(root);
+		void refreshStatus();
+	};
+
+	// --- choosing a repository for a command -------------------------------------------------
+
+	/**
+	 * The repository a window-level command (status bar, menu) acts on. One candidate is taken as is;
+	 * with several, the repository of the file in the active editor wins, otherwise the user picks.
+	 */
+	const chooseReview = async (candidates: RepoReview[]): Promise<RepoReview | undefined> => {
+		if (candidates.length <= 1) {
+			return candidates[0];
 		}
-		const confirm = vscode.l10n.t('Clear');
-		const answer = await vscode.window.showWarningMessage(
-			vscode.l10n.t(
-				'Clear the hunk session: delete {0} stored comment(s) and every comment of the session? This cannot be undone.',
-				comments.length,
-			),
-			{ modal: true },
-			confirm,
-		);
-		if (answer !== confirm) {
-			return;
+		const activeUri = vscode.window.activeTextEditor?.document.uri;
+		const active = activeUri ? reviewOwning(activeUri) : undefined;
+		if (active && candidates.includes(active)) {
+			return active;
 		}
-		await serializeSessionOp(async () => {
-			const live = sessionManager.currentSession() !== undefined;
-			try {
-				if (live) {
-					await cli.clearComments(root);
-				}
-				await store.clear();
-				if (live) {
-					// Re-read the now empty session so the next poll doesn't report the
-					// cleared notes as an incoming change.
-					await sync.pollOnce();
-				}
-			} catch (err) {
-				if (err instanceof HunkNotInstalledError) {
-					void warnHunkNotInstalled();
-					return;
-				}
-				void vscode.window.showErrorMessage(
-					vscode.l10n.t(
-						'Failed to clear the hunk session: {0}',
-						err instanceof Error ? err.message : String(err),
-					),
-				);
-				return;
-			}
-			await hasPending();
-			await bridge.refresh();
+		const picks: ReviewPick[] = candidates.map((review) => ({
+			label: `$(repo) ${review.name}`,
+			description: review.root,
+			review,
+		}));
+		const pick = await vscode.window.showQuickPick(picks, {
+			placeHolder: vscode.l10n.t('Select a repository'),
 		});
+		return pick?.review;
 	};
 
-	// Adding a comment starts the hunk session if it isn't running yet. Runs in the
-	// background (the comment is already stored); concurrent adds share one attempt.
-	let sessionStart: Promise<void> | undefined;
-	const startSessionInBackground = () => {
-		if (sessionManager.currentSession() || sessionStart) {
-			return;
-		}
-		sessionStart = serializeSessionOp(async () => {
-			try {
-				await sessionManager.ensureSession();
-				sync.start(5_000);
-			} catch (err) {
-				if (err instanceof HunkNotInstalledError) {
-					void warnHunkNotInstalled();
-					return;
-				}
-				void vscode.window.showWarningMessage(
-					vscode.l10n.t(
-						'Failed to start hunk session: {0}',
-						err instanceof Error ? err.message : String(err),
-					),
-				);
-			}
-		}).finally(() => {
-			sessionStart = undefined;
-			void hasPending();
-		});
-	};
-
-	// A commit on the same branch changes HEAD's sha: comments whose lines went into it
-	// are moved to the archive. A branch switch also changes the sha, so it is excluded by name.
-	let lastHead = diff.getHead();
-	const archiveAfterCommit = async (changed: ChangedLines) => {
-		const prev = lastHead;
-		const head = diff.getHead();
-		lastHead = head;
-		if (!prev?.commit || !head?.commit || prev.commit === head.commit || prev.name !== head.name) {
-			return;
-		}
-		const { comments, notes = [] } = await store.load();
-		const archived = await store.archive(
-			findOutOfDiffCommentIds(comments, changed),
-			head.commit,
-			findOutOfDiffNoteIds(notes, changed),
-		);
-		if (archived > 0) {
-			void vscode.window.showInformationMessage(
-				vscode.l10n.t('Archived {0} comment(s) after the commit.', archived),
-			);
-		}
-	};
-
-	// A comment whose line left the working tree diff can never be sent — most often because the
-	// change was staged (the index is not part of the review surface), or reverted. Say so instead
-	// of letting the comment sit in the store until someone presses Send and nothing happens.
-	const markStaleComments = async (changed: ChangedLines, notify = true) => {
-		const stale = findStaleCommentIds(await store.pending(), changed);
-		for (const id of stale) {
-			await store.update(id, { status: 'stale' });
-		}
-		if (notify && stale.length > 0) {
-			void vscode.window.showWarningMessage(
-				vscode.l10n.t(
-					'{0} comment(s) will not be sent: their lines left the working tree diff (staged or reverted).',
-					stale.length,
-				),
-			);
-		}
-	};
-
-	const markStaleOnApplyFailure = async (err: unknown) => {
-		if (!sessionManager.currentSession()) {
-			return;
-		}
-		try {
-			// `session review` only reports new-side hunks — old-side staleness
-			// stays undetected here, caught later by the regular diff-based check.
-			// Sending reports its own "not sent" warning, so this pass stays quiet.
-			await markStaleComments(
-				{
-					newLines: hunksToChangedLines(await cli.sessionReview(root)),
-					oldLines: new Map(),
-				},
-				false,
-			);
-		} catch {
-			// stale diagnostics unavailable — not critical
-		}
-		void err;
-	};
-
-	// Live update: saves and git operations lead to recomputing the diff,
-	// decorations, marking comments stale, and (if the session is live) reloading hunk's content.
-	const onWorktreeChanged = async () => {
-		const changed = await diff.getChangedLines();
-		// Anchors move first: archiving and the stale check both decide by line numbers and must see
-		// the re-resolved ones. The call never throws, so one store failure cannot cancel them.
-		await commentAnchors.reanchorAll(changed);
-		await refreshDecorations(changed);
-		await archiveAfterCommit(changed);
-		// Stale marking runs even for an empty diff: staging every change empties it, and that is
-		// exactly when the comments on those lines have to be reported as unsendable.
-		await markStaleComments(changed);
-		// Skip an empty diff for the reload: reloading with no changes disconnects the session
-		// from the daemon (observed on 0.21.x); a clean tree is handled by auto-stop.
-		if (changed.newLines.size > 0 && sessionManager.currentSession()) {
-			try {
-				await cli.reload(root);
-				await sync.pollOnce();
-			} catch {
-				// reload failure isn't critical — polling and the next send will still work
+	const filterReviews = async (
+		predicate: (review: RepoReview) => boolean | Promise<boolean>,
+	): Promise<RepoReview[]> => {
+		const matching: RepoReview[] = [];
+		for (const review of [...reviews.values()]) {
+			if (await predicate(review)) {
+				matching.push(review);
 			}
 		}
-		await hasPending();
-		await bridge.refresh();
+		return matching;
 	};
-	const worktreeWatcher = createDebouncer(2_000, () =>
-		serializeSessionOp(onWorktreeChanged),
-	);
+
+	// --- window-level commands ---------------------------------------------------------------
 
 	const openDiff = async () => {
-		const repo = diff.getRepo();
-		if (!repo) {
+		if (reviews.size === 0) {
 			void vscode.window.showErrorMessage(vscode.l10n.t('Git repository not found'));
 			return;
 		}
-		const changed = await diff.getChangedLines();
-		if (changed.newLines.size === 0) {
+		const dirty = await filterReviews((r) => r.hasChanges());
+		if (dirty.length === 0) {
 			void vscode.window.showInformationMessage(vscode.l10n.t('No uncommitted changes'));
 			return;
 		}
-		await ensureGitignore(hunkDir);
-		for (const [file] of changed.newLines) {
-			const uri = vscode.Uri.joinPath(repo.rootUri, file);
-			await diff.openDiffForFile(uri);
-			break; // open the first changed file; others are opened by clicking the list
-		}
-		await bridge.refresh();
-		await refreshDecorations();
-		await checkHunkInstalled();
-	};
-
-	// Flips one comment back out of the native editing textarea locally. Needed because
-	// CommentBridge.refresh() now preserves whatever is still flagged 'editing' across
-	// background refreshes (see commentBridge.ts) — without this, Save/Cancel would leave
-	// the comment stuck in Editing mode forever, and its edit/delete menu (gated on
-	// contextValue === 'pending') would never come back.
-	const exitEditingMode = (comment: HunkComment) => {
-		const thread = comment?.parent;
-		if (!comment?.storeId || !thread) {
-			return;
-		}
-		thread.comments = thread.comments.map((c) =>
-			c === comment
-				? ({ ...c, mode: vscode.CommentMode.Preview, contextValue: 'pending' } as HunkComment)
-				: c,
-		);
-	};
-
-	const removeReplyDraft = (draft: HunkComment) => {
-		const thread = draft.parent;
-		if (thread) {
-			thread.comments = thread.comments.filter((c) => c !== draft);
+		if ((await (await chooseReview(dirty))?.openDiff()) === true) {
+			await checkHunkInstalled();
 		}
 	};
 
-	// The reply inherits its parent note's anchor in hunk, so unlike a new comment
-	// it skips the changed-lines check; the stored line only places it in the thread.
-	const saveReplyDraft = async (draft: HunkComment) => {
-		const summary = (typeof draft.body === 'string' ? draft.body : draft.body.value).trim();
-		if (!summary) {
-			void vscode.window.showInformationMessage(vscode.l10n.t('Comment cannot be empty.'));
-			return;
+	// Every repository with pending comments sends them to its own session.
+	const sendComments = async () => {
+		for (const review of await filterReviews(async (r) => (await r.pendingCount()) > 0)) {
+			await review.sendComments();
 		}
-		const anchor = draft.parent ? bridge.threadAnchor(draft.parent) : undefined;
-		if (!anchor || !draft.replyTo) {
-			return;
-		}
-		await store.add(
-			anchor.file,
-			anchor.side === 'old' ? { oldLine: anchor.line } : { newLine: anchor.line },
-			summary,
-			{ replyTo: draft.replyTo },
-		);
-		removeReplyDraft(draft);
-		await hasPending();
-		await bridge.refresh();
-		startSessionInBackground();
+	};
+
+	// Stop/connect/clear prefer the repositories where there is something to act on.
+	const sessionTarget = async () => {
+		const live = await filterReviews((r) => r.hasSession());
+		return chooseReview(live.length > 0 ? live : [...reviews.values()]);
+	};
+
+	const stopSession = async () => (await sessionTarget())?.stopSession();
+	const connectToSession = async () => (await sessionTarget())?.connectToSession();
+	const clearSession = async () => {
+		const withData = await filterReviews((r) => r.hasStoredComments());
+		await (await chooseReview(withData.length > 0 ? withData : [...reviews.values()]))?.clearSession();
 	};
 
 	context.subscriptions.push(
 		statusBar,
 		sendStatusBar,
 		startStatusBar,
-		bridge,
-		sessionManager,
-		sync,
-		// Wire sync changes to bridge refresh (C2: arrived notes trigger display update);
-		// notes are cached in comments.json first, since the bridge renders from there.
-		sync.onDidChange(async (notes) => {
-			const session = sessionManager.currentSession();
-			if (session) {
-				await store.mergeNotes(session.sessionId, notes).catch(() => undefined);
-			}
-			await bridge.refresh();
-		}),
-		sync.onSessionLost(() => {
-			sessionManager.clearSession();
-			void hasPending();
-			void vscode.window.showInformationMessage(vscode.l10n.t('hunk session ended'));
-		}),
+		{
+			dispose: () => {
+				for (const review of reviews.values()) {
+					review.dispose();
+				}
+				reviews.clear();
+			},
+		},
 		vscode.workspace.onDidChangeConfiguration((e) => {
 			if (e.affectsConfiguration('hunk-review.githubUsername')) {
-				void userAvatar.refresh().then(() => bridge.refresh());
+				for (const review of reviews.values()) {
+					void review.refreshAvatar();
+				}
 			}
 		}),
 		vscode.authentication.onDidChangeSessions((e) => {
 			if (e.provider.id === 'github') {
-				void userAvatar.refresh().then(() => bridge.refresh());
+				for (const review of reviews.values()) {
+					void review.refreshAvatar();
+				}
 			}
 		}),
-		worktreeWatcher,
+		// Live-update trigger: a save leads to a debounced diff recomputation in the repository
+		// the file belongs to (git operations are picked up from each repository's own state events).
+		vscode.workspace.onDidSaveTextDocument((doc) => reviewOwning(doc.uri)?.triggerWorktreeUpdate()),
 		vscode.commands.registerCommand('hunk-review.openDiff', openDiff),
 		vscode.commands.registerCommand('hunk-review.sendComments', sendComments),
-		vscode.commands.registerCommand('hunk-review.stopSession', async () => {
-			sync.stop();
-			await sessionManager.stopSession(vscode.l10n.t('stopped by user'));
-			await hasPending();
-		}),
-		vscode.commands.registerCommand('hunk-review.connectToSession', () =>
-			sessionManager.connectToSession(),
-		),
+		vscode.commands.registerCommand('hunk-review.stopSession', stopSession),
+		vscode.commands.registerCommand('hunk-review.connectToSession', connectToSession),
 		vscode.commands.registerCommand('hunk-review.clearSession', clearSession),
 		vscode.commands.registerCommand('hunk-review.menu', async () => {
-			const pendingCount = await store.pendingCount();
-			const items: Array<vscode.QuickPickItem & { action: () => Promise<void> | void }> = [
+			const pendingCount = await totalPending();
+			const items: Array<vscode.QuickPickItem & { action: () => Promise<unknown> | void }> = [
 				{ label: `$(git-compare) ${vscode.l10n.t('Open review')}`, action: () => openDiff() },
 				{
 					label: `$(comment) ${vscode.l10n.t('Send comments to agent ({0})', pendingCount)}`,
@@ -615,15 +324,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				},
 				{
 					label: `$(plug) ${vscode.l10n.t('Connect to session')}`,
-					action: () => sessionManager.connectToSession(),
+					action: () => connectToSession(),
 				},
 				{
 					label: `$(close) ${vscode.l10n.t('Stop hunk session')}`,
-					action: async () => {
-						sync.stop();
-						await sessionManager.stopSession(vscode.l10n.t('stopped by user'));
-						await hasPending();
-					},
+					action: () => stopSession(),
 				},
 				{
 					label: `$(trash) ${vscode.l10n.t('Clear hunk session')}`,
@@ -635,54 +340,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				await pick.action();
 			}
 		}),
+
+		// --- comment-level commands: routed to the repository of the comment's document ---------
 		vscode.commands.registerCommand('hunk-review.addComment', async (reply) => {
 			const { thread, text } = (reply ?? {}) as { thread?: vscode.CommentThread; text?: string };
 			if (!thread) {
 				return;
 			}
-			const summary = (text ?? '').trim();
-			if (!summary) {
-				void vscode.window.showInformationMessage(
-					vscode.l10n.t('Enter comment text in the thread field and click the button again.'),
-				);
-				return;
-			}
-			const file = relPathFromRoot(thread.uri);
-			const line = ((thread.range?.start.line) ?? 0) + 1;
-			// The draft lives on one of the diff editor's two documents. Being `git:`-scheme
-			// doesn't make it the original side: a staged change diffs HEAD against the index,
-			// which VS Code serves over the same scheme.
-			const target =
-				diff.diffSideOf(thread.uri) === 'old' ? { oldLine: line } : { newLine: line };
-			// The commenting ranges may be outdated by now (a save/revert between opening
-			// the draft and submitting it): a line outside the diff could never be sent to hunk.
-			if (!isLineInDiff(file, target, await diff.getChangedLines())) {
-				void vscode.window.showWarningMessage(
-					vscode.l10n.t(
-						'Comments can only be added to lines changed in the working tree — staged changes are not part of the review.',
-					),
-				);
+			const review = reviewOwning(thread.uri);
+			if (!review) {
 				thread.dispose();
 				return;
 			}
-			// The content anchor is captured from the file on disk, so the comment can follow its
-			// code line later. Blank lines and unreadable files simply go without one.
-			const anchor =
-				target.newLine === undefined
-					? undefined
-					: captureAnchor(
-							(await diff.readWorkingTreeLines(repoRootUri(), file)) ?? [],
-							line,
-							anchorContextLines(),
-						);
-			await store.add(file, target, summary, { anchor });
-			// Close the draft thread ("Start discussion"), otherwise it stays
-			// open next to the thread rebuilt from the store.
-			thread.dispose();
-			await hasPending();
-			await bridge.refresh();
-			void refreshDecorations();
-			startSessionInBackground();
+			await review.addComment(thread, text);
 		}),
 		vscode.commands.registerCommand('hunk-review.editComment', (comment: HunkComment) => {
 			const thread = comment?.parent;
@@ -697,127 +367,58 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 					: c,
 			);
 		}),
-		vscode.commands.registerCommand('hunk-review.replyToNote', (note: HunkComment) => {
-			const thread = note?.parent;
-			if (!note?.noteId || !thread) {
-				return;
-			}
-			// One draft per thread: a second click just keeps the open one.
-			if ((thread.comments as HunkComment[]).some((c) => c.contextValue === 'replyDraft')) {
-				return;
-			}
-			const draft: HunkComment = {
-				body: '',
-				author: { name: vscode.l10n.t('You'), iconPath: userAvatar.uri() },
-				mode: vscode.CommentMode.Editing,
-				contextValue: 'replyDraft',
-				replyTo: note.noteId,
-				parent: thread,
-			};
-			thread.comments = [...thread.comments, draft];
-			thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
-		}),
-		vscode.commands.registerCommand('hunk-review.saveComment', async (comment: HunkComment) => {
-			if (comment?.contextValue === 'replyDraft') {
-				await saveReplyDraft(comment);
-				return;
-			}
-			const id = comment?.storeId;
-			if (!id) {
-				return;
-			}
-			const summary = (typeof comment.body === 'string' ? comment.body : comment.body.value).trim();
-			if (!summary) {
-				void vscode.window.showInformationMessage(vscode.l10n.t('Comment cannot be empty.'));
-				return;
-			}
-			await store.update(id, { summary });
-			exitEditingMode(comment);
-			await bridge.refresh();
-		}),
-		vscode.commands.registerCommand('hunk-review.cancelEditComment', async (comment: HunkComment) => {
-			if (comment?.contextValue === 'replyDraft') {
-				removeReplyDraft(comment);
-				return;
-			}
-			// Store wasn't touched — exiting Editing mode locally and refreshing
-			// rebuilds this comment from the store, discarding the in-progress edit.
-			exitEditingMode(comment);
-			await bridge.refresh();
-		}),
-		vscode.commands.registerCommand('hunk-review.deleteComment', async (comment: HunkComment) => {
-			const id = comment?.storeId;
-			if (!id) {
-				return;
-			}
-			await store.remove(id);
-			await hasPending();
-			await bridge.refresh();
-			void refreshDecorations();
-		}),
+		vscode.commands.registerCommand('hunk-review.replyToNote', (note: HunkComment) =>
+			reviewOfComment(note)?.replyToNote(note),
+		),
+		vscode.commands.registerCommand('hunk-review.saveComment', (comment: HunkComment) =>
+			reviewOfComment(comment)?.saveComment(comment),
+		),
+		vscode.commands.registerCommand('hunk-review.cancelEditComment', (comment: HunkComment) =>
+			reviewOfComment(comment)?.cancelEditComment(comment),
+		),
+		vscode.commands.registerCommand('hunk-review.deleteComment', (comment: HunkComment) =>
+			reviewOfComment(comment)?.deleteComment(comment),
+		),
 	);
 
-	// Live-update triggers: file saves and git operations
-	// (commit/stash/checkout) feed one debounced handler.
-	context.subscriptions.push(
-		vscode.workspace.onDidSaveTextDocument(() => worktreeWatcher.trigger()),
-	);
-	const repo = diff.getRepo();
-	if (repo?.state.onDidChange) {
-		context.subscriptions.push(repo.state.onDidChange(() => worktreeWatcher.trigger()));
-	}
-	// Auto-stop on a clean working tree — via a periodic check.
-	const autoStopTimer = setInterval(() => {
-		void sessionManager.maybeAutoStop().then(() => {
-			// Session stopped — don't leave polling running to accumulate errors.
-			if (!sessionManager.currentSession()) {
-				sync.stop();
-			}
-			return hasPending();
-		});
-	}, 5_000);
-	context.subscriptions.push(new vscode.Disposable(() => clearInterval(autoStopTimer)));
+	void refreshStatus();
 
-	// C2: if a session already exists at activation, start polling immediately.
-	if (sessionManager.currentSession()) {
-		sync.start(5_000);
-	}
-
-	void hasPending();
-	// Resolve stored anchors before the first render: a window reload does not run the watcher, and
-	// the diff (hence the candidate lines) is only known once the git extension is up. A failure here
-	// must not leave the extension without a comment controller at all, so it is logged and swallowed.
+	// Repositories come from the git extension. They are discovered asynchronously, and more can
+	// open later (a folder added to the workspace, a submodule), so both the ones already known
+	// and the ones announced afterwards get a review. A failure here must not leave the extension
+	// without its commands, so it is logged and swallowed.
 	try {
 		await vscode.extensions.getExtension('vscode.git')?.activate();
-		await commentAnchors.reanchorAll(await diff.getChangedLines());
+		const api: GitApiLike | undefined = getGitApi();
+		if (api) {
+			for (const repo of api.repositories) {
+				addRepo(repo);
+			}
+			if (api.onDidOpenRepository) {
+				context.subscriptions.push(api.onDidOpenRepository(addRepo));
+			}
+			if (api.onDidCloseRepository) {
+				context.subscriptions.push(api.onDidCloseRepository(removeRepo));
+			}
+		}
 	} catch (err) {
-		console.warn('[hunk-review] failed to re-anchor comments on activation', err);
+		console.warn('[hunk-review] failed to attach to the git extension', err);
 	}
-	bridge.activate(context);
-	// Resolves in the background — comments render with the local fallback icon
-	// until the GitHub avatar is known, then pick it up on the next refresh.
-	void userAvatar.refresh().then(() => bridge.refresh());
+
 	void cli.version().then(
 		(v) => {
 			repliesSupported = supportsReplies(v);
 			if (isHunkTooOldForReplies(v)) {
 				void warnHunkTooOld(v);
 			}
-			return bridge.refresh();
+			return Promise.all([...reviews.values()].map((r) => r.refreshThreads()));
 		},
 		() => undefined, // missing hunk is reported by checkHunkInstalled when a review opens
 	);
-	// The session may have been started earlier (or the terminal session restarted):
-	// on activation, look for a live session and enable comment polling.
-	void sessionManager.findSession().then((s) => {
-		if (s) {
-			sync.start(5_000);
-		}
-	});
 }
 
 export function deactivate(): void {
-	// SessionManager.dispose() is called via context.subscriptions.
+	// Reviews and the comment controller are disposed via context.subscriptions.
 }
 
 function registerStubCommands(context: vscode.ExtensionContext): void {
@@ -839,9 +440,4 @@ function registerStubCommands(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('hunk-review.cancelEditComment', noWorkspace),
 		vscode.commands.registerCommand('hunk-review.deleteComment', noWorkspace),
 	);
-}
-
-function relPathFromRoot(uri: vscode.Uri): string {
-	const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-	return uri.fsPath.startsWith(root) ? uri.fsPath.slice(root.length + 1) : uri.fsPath;
 }

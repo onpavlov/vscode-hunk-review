@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { ChangedLines, LineRange } from './diffService.js';
+import { repoRelative } from './repoPaths.js';
 
 export function expandRanges(ranges: LineRange[]): number[] {
 	return ranges.flatMap((r) => {
@@ -33,9 +34,20 @@ const VIVID_COLORS: Record<'dark' | 'light', Record<'added' | 'removed', SideCol
 	},
 };
 
+export interface DecorationsOptions {
+	/** Repository root the changed-line keys are relative to; defaults to the first workspace folder. */
+	repoRoot?: string;
+	/**
+	 * Whether a document belongs to this repository. With several repositories each one decorates
+	 * only its own editors and leaves the rest to the others; omitted = every editor.
+	 */
+	ownsUri?: (uri: vscode.Uri) => boolean;
+}
+
 export function createDecorations(
 	/** Which side of a diff editor a document belongs to; `git:` documents are original by default. */
 	diffSideOf: (uri: vscode.Uri) => 'old' | 'new' = (uri) => (uri.scheme === 'git' ? 'old' : 'new'),
+	options: DecorationsOptions = {},
 ): {
 	update(changedLines: ChangedLines): void;
 	dispose(): void;
@@ -49,6 +61,9 @@ export function createDecorations(
 		}
 		for (const editor of vscode.window.visibleTextEditors) {
 			const uri = editor.document.uri;
+			if (options.ownsUri && !options.ownsUri(uri)) {
+				continue;
+			}
 			// Only diff editors are decorated: in a plain editor the whole-line
 			// backgrounds read as unexplained color blocks over the code.
 			if (!isShownInDiff(editor)) {
@@ -56,7 +71,10 @@ export function createDecorations(
 				editor.setDecorations(types.removed, []);
 				continue;
 			}
-			const file = relPath(uri);
+			const file = repoRelative(
+				options.repoRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '',
+				uri,
+			);
 			// Only the original side holds the deleted lines. A staged change is diffed against
 			// the index, which VS Code also serves over the `git:` scheme — so ask the diff
 			// rather than the scheme which side this editor is.
@@ -161,9 +179,4 @@ function isShownInDiff(editor: vscode.TextEditor): boolean {
 	}
 	// No view column (e.g. the original side of an inline diff): fall back to any diff tab.
 	return vscode.window.tabGroups.all.some((g) => g.tabs.some(inDiff));
-}
-
-function relPath(uri: vscode.Uri): string {
-	const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-	return uri.fsPath.startsWith(root) ? uri.fsPath.slice(root.length + 1) : uri.fsPath;
 }

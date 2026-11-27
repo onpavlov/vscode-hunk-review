@@ -1,5 +1,7 @@
 import * as assert from 'node:assert';
-import { buildThreadDescriptors } from '../commentBridge.js';
+import * as vscode from 'vscode';
+import { buildThreadDescriptors, CommentBridge } from '../commentBridge.js';
+import type { CommentStore } from '../commentStore.js';
 import type { StoredComment, HunkNote } from '../types.js';
 
 function stored(over: Partial<StoredComment>): StoredComment {
@@ -261,5 +263,41 @@ suite('buildThreadDescriptors', () => {
 		assert.strictEqual(desc[1].comments[0].storeId, undefined);
 		assert.strictEqual(desc[2].comments[0].contextValue, 'stale');
 		assert.strictEqual(desc[2].comments[0].storeId, 'x');
+	});
+});
+
+suite('CommentBridge.provideCommentingRanges (repository root)', () => {
+	const repoRoot = vscode.Uri.file('/work/loyalty-fetcher');
+	const changed = async () => ({
+		newLines: new Map([['services/a.go', [{ start: 3, end: 5 }]]]),
+		oldLines: new Map(),
+	});
+	const bridge = new CommentBridge(
+		{} as unknown as CommentStore,
+		async () => [],
+		changed,
+		(file) => vscode.Uri.file(file),
+		() => undefined,
+		() => false,
+		undefined,
+		() => 'new',
+		repoRoot,
+	);
+	const documentAt = (fsPath: string) => ({ uri: vscode.Uri.file(fsPath) }) as vscode.TextDocument;
+
+	test('offers the changed lines of a file, keyed relative to the repository root', async () => {
+		const ranges = await bridge.provideCommentingRanges(
+			documentAt('/work/loyalty-fetcher/services/a.go'),
+		);
+		assert.strictEqual(ranges.length, 1);
+		assert.strictEqual(ranges[0].start.line, 2);
+		assert.strictEqual(ranges[0].end.line, 4);
+	});
+
+	test('offers nothing for a file of another repository', async () => {
+		const ranges = await bridge.provideCommentingRanges(
+			documentAt('/work/contracts/services/a.go'),
+		);
+		assert.deepStrictEqual(ranges, []);
 	});
 });

@@ -206,6 +206,41 @@ suite('DiffService.readWorkingTreeLines', () => {
 	});
 });
 
+suite('DiffService.getRepo (several repositories)', () => {
+	function repoAt(root: string, diffText = ''): GitRepositoryLike {
+		return {
+			rootUri: vscode.Uri.file(root),
+			diff: async () => diffText,
+			getConfig: async () => '',
+			state: { workingTreeChanges: [], indexChanges: [] },
+		};
+	}
+
+	const contracts = repoAt('/work/contracts');
+	const fetcher = repoAt(
+		'/work/loyalty-fetcher',
+		['diff --git a/svc/a.go b/svc/a.go', '--- a/svc/a.go', '+++ b/svc/a.go', '@@ -1,1 +1,2 @@'].join('\n'),
+	);
+	const api: GitApiLike = { repositories: [contracts, fetcher], toGitUri: (u) => u };
+
+	test('a service pinned to a root uses that repository, not the first one', async () => {
+		const service = new DiffService(() => api, fetcher.rootUri.fsPath);
+		assert.strictEqual(service.getRepo(), fetcher);
+		const { newLines } = await service.getChangedLines();
+		assert.deepStrictEqual([...newLines.keys()], ['svc/a.go']);
+	});
+
+	test('a pinned service does not fall back to another repository', () => {
+		const service = new DiffService(() => api, '/work/mindbox-sender');
+		assert.strictEqual(service.getRepo(), undefined);
+	});
+
+	test('an unpinned service keeps picking by the first workspace folder', () => {
+		const service = new DiffService(() => api);
+		assert.ok(service.getRepo() !== undefined);
+	});
+});
+
 suite('DiffService.getUserEmail', () => {
 	test('returns user.email from the repo config', async () => {
 		const repo = fakeRepo(async (key) => (key === 'user.email' ? 'octocat@example.com' : ''));

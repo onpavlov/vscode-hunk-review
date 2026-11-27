@@ -45,6 +45,9 @@ export interface GitRepositoryLike {
 export interface GitApiLike {
 	repositories: GitRepositoryLike[];
 	toGitUri(uri: vscode.Uri, ref: string): vscode.Uri;
+	/** Repositories are discovered asynchronously, and more can open later (absent in test fakes). */
+	onDidOpenRepository?: vscode.Event<GitRepositoryLike>;
+	onDidCloseRepository?: vscode.Event<GitRepositoryLike>;
 }
 
 export function getGitApi(): GitApiLike | undefined {
@@ -56,12 +59,23 @@ export function getGitApi(): GitApiLike | undefined {
 }
 
 export class DiffService {
-	constructor(private readonly gitApi: () => GitApiLike | undefined = getGitApi) {}
+	/**
+	 * `repoRoot` pins the service to one repository of a multi-repository window. Without it the
+	 * repository of the first workspace folder is used.
+	 */
+	constructor(
+		private readonly gitApi: () => GitApiLike | undefined = getGitApi,
+		private readonly repoRoot?: string,
+	) {}
 
 	getRepo(): GitRepositoryLike | undefined {
 		const api = this.gitApi();
 		if (!api || api.repositories.length === 0) {
 			return undefined;
+		}
+		if (this.repoRoot !== undefined) {
+			// No fallback to another repository: its diff would be attributed to this one.
+			return api.repositories.find((r) => r.rootUri.fsPath === this.repoRoot);
 		}
 		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 		if (!workspaceFolder) {
